@@ -699,31 +699,7 @@ footer {
 footer code { background: rgba(255,255,255,.1); color: var(--wc-gold); }
 
 .stats-head { text-transform: uppercase; font-size: .8rem; letter-spacing: 1px; color: var(--text-muted); margin-bottom: .75rem; display: flex; gap: .5rem; align-items: baseline; flex-wrap: wrap; }
-
-/* ILLUSTRATIVE PASSING MAP */
-.pitch-wrap { margin-top: 1.5rem; }
-.pitch-head { display: flex; justify-content: space-between; align-items: baseline; gap: .5rem; margin-bottom: .45rem; }
-.pitch-head > span:first-child { text-transform: uppercase; font-size: .8rem; letter-spacing: 1px; color: var(--text-muted); font-weight: 600; }
-.pitch-note { font-size: .68rem; color: var(--wc-gold); opacity: .9; font-style: italic; white-space: nowrap; }
-.pitch-svg { width: 100%; height: auto; border-radius: 10px; display: block; box-shadow: var(--shadow-sm); }
-.pp-grass { fill: #1f7a44; }
-:root[data-theme="dark"] .pp-grass { fill: #15623a; }
-.pp-line { stroke: rgba(255,255,255,.5); stroke-width: 1.2; }
-.pp-home { fill: #5b8cff; stroke: #fff; stroke-width: .6; }
-.pp-away { fill: #ff5577; stroke: #fff; stroke-width: .6; }
-.pp-ball { fill: #fff; stroke: #111; stroke-width: 1; }
-#pitchBall, #pitchRing { transition: transform .85s cubic-bezier(.45,.05,.3,1); }
-.pp-ring { fill: none; stroke: var(--wc-gold); stroke-width: 1.5; animation: pp-pulse 1.3s ease-in-out infinite; }
-@keyframes pp-pulse { 0%, 100% { r: 8px; opacity: .8; } 50% { r: 12px; opacity: .25; } }
-.pp-pass { stroke: #fff; stroke-width: 1.6; stroke-dasharray: 3 3; transition: opacity .6s ease; opacity: .12; }
-.pitch-legend { display: flex; align-items: center; gap: .4rem; font-size: .8rem; color: var(--text-muted); margin-top: .5rem; }
-.pp-key { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
-.pp-key.pp-home { background: #5b8cff; }
-.pp-key.pp-away { background: #ff5577; margin-left: .6rem; }
-@media (prefers-reduced-motion: reduce) {
-    #pitchBall, #pitchRing { transition: none; }
-    .pp-ring { animation: none; }
-}
+.illus-note { font-size: .68rem; color: var(--wc-gold); opacity: .9; font-style: italic; text-transform: none; letter-spacing: 0; }
 
 /* SKELETON LOADING */
 :root { --sk-base: #e7e8ef; --sk-hi: #f3f4f8; }
