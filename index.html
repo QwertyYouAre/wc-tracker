@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WC Tracker — FIFA World Cup 2026</title>
+    <link rel="stylesheet" href="styles.css">
+    <script>
+        // Apply saved theme + mobile detection before first paint (no flash / reflow).
+        (function () {
+            var root = document.documentElement;
+            try {
+                // Dark is the default; a saved choice (light or dark) still wins.
+                root.setAttribute('data-theme', localStorage.getItem('wc26-theme') || 'dark');
+            } catch (e) {}
+            try {
+                var ua = navigator.userAgent || '';
+                var coarse = window.matchMedia && matchMedia('(pointer: coarse)').matches;
+                // UA covers phones; coarse-pointer + narrow viewport covers tablets and
+                // iPads (which report a desktop UA on recent iOS).
+                var isMobile = /Mobi|Android|iPhone|iPod|IEMobile|BlackBerry|Opera Mini/i.test(ua)
+                    || (coarse && window.matchMedia && matchMedia('(max-width: 820px)').matches);
+                if (isMobile) root.classList.add('is-mobile');
+            } catch (e) {}
+        })();
+    </script>
+</head>
+<body>
+    <header>
+        <nav>
+            <div class="logo">
+                <span class="trophy-icon">🏆</span>
+                <div>
+                    <div class="logo-title">WC Tracker</div>
+                    <div class="logo-sub">FIFA World Cup 2026 ·
+                        <img class="flag-img logo-flag" src="https://flagcdn.com/h20/us.png" alt="USA">
+                        <img class="flag-img logo-flag" src="https://flagcdn.com/h20/ca.png" alt="Canada">
+                        <img class="flag-img logo-flag" src="https://flagcdn.com/h20/mx.png" alt="Mexico">
+                    </div>
+                </div>
+            </div>
+            <ul class="nav-links">
+                <li><a href="#live" class="nav-link active" data-section="live">Live & Upcoming</a></li>
+                <li><a href="#groups" class="nav-link" data-section="groups">Groups</a></li>
+                <li><a href="#bracket" class="nav-link" data-section="bracket">Bracket</a></li>
+                <li><a href="#scorers" class="nav-link" data-section="scorers">Top Scorers</a></li>
+                <li><a href="#favorites" class="nav-link" data-section="favorites">★ Favorites</a></li>
+                <li><button class="theme-toggle" id="themeToggle" type="button" aria-label="Toggle dark mode" title="Toggle dark mode">🌙</button></li>
+            </ul>
+        </nav>
+        <div class="tournament-bar">
+            <div class="tb-item"><span class="tb-label">Tournament</span><span class="tb-value" id="tournamentDay">Day —</span></div>
+            <div class="tb-item"><span class="tb-label">Today</span><span class="tb-value" id="todayDate">—</span></div>
+            <div class="tb-item"><span class="tb-label">Final</span><span class="tb-value">Jul 19 · MetLife</span></div>
+            <div class="tb-item"><span class="tb-label">Teams</span><span class="tb-value">48</span></div>
+        </div>
+    </header>
+
+    <main>
+        <!-- LIVE & UPCOMING -->
+        <section id="live" class="page-section active-section">
+            <div class="container">
+                <div class="section-header">
+                    <h2>Live & Upcoming</h2>
+                    <div class="filter-bar">
+                        <button class="filter-chip active" data-filter="all">All</button>
+                        <button class="filter-chip" data-filter="live">🔴 Live</button>
+                        <button class="filter-chip" data-filter="upcoming">Upcoming</button>
+                        <button class="filter-chip" data-filter="finished">Finished</button>
+                        <button class="filter-chip" data-filter="favorites">★ My teams</button>
+                    </div>
+                </div>
+
+                <div class="day-block">
+                    <h3 class="day-heading">🔴 Live Now</h3>
+                    <div class="match-grid" id="liveMatches"></div>
+                </div>
+
+                <div class="day-block">
+                    <h3 class="day-heading">📅 Today's Matches</h3>
+                    <div class="match-grid" id="todayMatches"></div>
+                </div>
+
+                <div class="day-block">
+                    <h3 class="day-heading">🔜 Upcoming</h3>
+                    <div class="match-grid" id="upcomingMatches"></div>
+                </div>
+
+                <div class="day-block">
+                    <h3 class="day-heading">✓ Recently Finished</h3>
+                    <div class="match-grid" id="finishedMatches"></div>
+                </div>
+            </div>
+        </section>
+
+        <!-- GROUPS -->
+        <section id="groups" class="page-section">
+            <div class="container">
+                <div class="section-header">
+                    <h2>Group Stage Standings</h2>
+                    <div class="legend">
+                        <span class="legend-item"><span class="dot dot-q"></span>Through to Round of 32</span>
+                        <span class="legend-item"><span class="dot dot-3"></span>Best-third contender</span>
+                        <span class="legend-item"><span class="dot dot-out"></span>Eliminated</span>
+                    </div>
+                </div>
+                <div class="groups-grid" id="groupsGrid"></div>
+
+                <h3 class="subhead">Best Third-Placed Teams</h3>
+                <p class="muted">The 8 best third-placed teams across all 12 groups advance to the Round of 32.</p>
+                <div class="third-table-wrap">
+                    <table class="standings-table third-table">
+                        <thead><tr><th>#</th><th>Group</th><th>Team</th><th>P</th><th>W</th><th>D</th><th>L</th><th>GD</th><th>Pts</th></tr></thead>
+                        <tbody id="thirdsBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- BRACKET -->
+        <section id="bracket" class="page-section">
+            <div class="container">
+                <div class="section-header">
+                    <h2>Knockout Bracket</h2>
+                    <p class="muted">Slots populate as group standings settle. Round of 32 begins June 28.</p>
+                </div>
+                <div class="bracket-scroll">
+                    <div class="bracket" id="bracketGrid"></div>
+                </div>
+            </div>
+        </section>
+
+        <!-- TOP SCORERS -->
+        <section id="scorers" class="page-section">
+            <div class="container">
+                <div class="section-header">
+                    <h2>Top Scorers</h2>
+                </div>
+                <div class="scorers-wrap">
+                    <table class="standings-table scorers-table">
+                        <thead><tr><th>#</th><th>Player</th><th>Team</th><th>Goals</th></tr></thead>
+                        <tbody id="scorersBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- FAVORITES -->
+        <section id="favorites" class="page-section">
+            <div class="container">
+                <div class="section-header">
+                    <h2>★ Favorites</h2>
+                    <p class="muted">Pick teams to follow. They'll be highlighted across the app and filtered into a personal feed.</p>
+                </div>
+                <div class="favorites-grid" id="favoritesPicker"></div>
+            </div>
+        </section>
+    </main>
+
+    <!-- MATCH DETAIL MODAL -->
+    <div class="modal-backdrop" id="modalBackdrop" aria-hidden="true">
+        <div class="modal" role="dialog" aria-labelledby="modalTitle">
+            <button class="modal-close" id="modalClose" aria-label="Close">×</button>
+            <div id="modalBody"></div>
+        </div>
+    </div>
+
+    <footer>
+        <div class="container">
+            <p>WC Tracker · sample fixture data for FIFA World Cup 2026 — update <code>data.js</code> with live feeds.</p>
+        </div>
+    </footer>
+
+    <script src="data.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
