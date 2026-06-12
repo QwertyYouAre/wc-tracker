@@ -463,7 +463,7 @@ function modalDetailHtml(m) {
     const eventsHtml = (evList && evList.length) ? `
         <div class="timeline">
             <h4>Match Events</h4>
-            ${evList.slice().sort((a, b) => a.min - b.min).map(ev => {
+            ${evList.slice().sort((a, b) => b.min - a.min).map(ev => {
                 const team = ev.side === 'home' ? home : away;
                 const icon = ev.type === 'goal' ? '⚽' : ev.type === 'og' ? '🥅' : ev.type === 'yellow' ? '🟨' : ev.type === 'red' ? '🟥' : ev.type === 'sub' ? '🔄' : ev.type === 'penalty' ? '⚽' : '•';
                 const text = ev.type === 'goal'
@@ -474,7 +474,7 @@ function modalDetailHtml(m) {
                     : ev.type === 'sub' ? `Substitution${ev.player ? ' · ' + ev.player : ''}`
                     : `${ev.type}${ev.player ? ' · ' + ev.player : ''}`;
                 return `<div class="tl-event">
-                    <span class="tl-min">${ev.min}'</span>
+                    <span class="tl-min">${ev.minLabel || ev.min}'</span>
                     <span class="tl-icon">${icon}</span>
                     <span class="tl-text">${text}<span class="tl-team-tag">${teamFlag(team)} ${team.name}</span></span>
                 </div>`;
@@ -855,7 +855,12 @@ function applyEspnSummary(m, sum) {
         else if (/substitut/i.test(tyt)) type = 'sub';
         if (!type) continue;
         const side = idToCode[e.team && e.team.id] === m.away ? 'away' : 'home';
-        const min = parseInt(String((e.clock && e.clock.displayValue) || '').replace(/\D+/g, ''), 10) || 0;
+        // "45'+1'" → sortable 45.01, label "45+1"; "11'" → 11, "11"
+        const cm = String((e.clock && e.clock.displayValue) || '').match(/(\d+)(?:\D*\+(\d+))?/);
+        const base = cm ? parseInt(cm[1], 10) : 0;
+        const extra = cm && cm[2] ? parseInt(cm[2], 10) : 0;
+        const min = base + extra / 100;
+        const minLabel = extra ? `${base}+${extra}` : `${base}`;
         const text = e.text || '';
         let player = null, assist = null;
         if (type === 'goal' || type === 'og') {
@@ -864,7 +869,7 @@ function applyEspnSummary(m, sum) {
         } else {
             const mm = text.match(/^\s*([^(]+?)\s*\(/); if (mm) player = mm[1].trim();
         }
-        evs.push({ min, type, side, player, assist });
+        evs.push({ min, minLabel, type, side, player, assist });
     }
     if (evs.length) m.espnEvents = evs;
 }
