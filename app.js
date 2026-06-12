@@ -33,17 +33,13 @@ function teamFlag(team) {
     return `<img class="flag-img" src="flags/${iso}.png" alt="${team.code}" loading="lazy" decoding="async">`;
 }
 
+// ===== DATA STATE (populated by setDataset() after load) =====
+let TOURNAMENT, TEAMS, MATCHES, TEAM;
+let todayDate, startDate, NOW_INSTANT, LOCAL_TODAY;
+
 // ===== DATE / TIME HELPERS =====
-const todayDate = TOURNAMENT.today;
-const startDate = new Date(TOURNAMENT.startDate + 'T00:00:00');
-
-function tournamentDay() {
-    const today = new Date(todayDate + 'T00:00:00');
-    return Math.floor((today - startDate) / 86400000) + 1;
-}
-
-// Fixture times in data.js are US Eastern wall-clock (see data.js).
-// Convert them to the instant they represent, then render in the viewer's local zone.
+// Live (openfootball) fixtures carry an absolute `kickoffISO`. Bundled fallback
+// fixtures store a US Eastern wall-clock date+time; convert those to an instant.
 const SOURCE_TZ = 'America/New_York';
 
 function tzOffsetMs(timeZone, date) {
@@ -65,44 +61,47 @@ function kickoffInstant(dateStr, timeStr) {
     const [y, mo, d] = dateStr.split('-').map(Number);
     const [h, mi] = timeStr.split(':').map(Number);
     const naive = Date.UTC(y, mo - 1, d, h, mi); // ET wall-clock treated as if UTC
-    const offset = tzOffsetMs(SOURCE_TZ, new Date(naive));
-    return new Date(naive - offset);
+    return new Date(naive - tzOffsetMs(SOURCE_TZ, new Date(naive)));
 }
 
-function fmtLocalTime(dateStr, timeStr) {
-    return kickoffInstant(dateStr, timeStr)
-        .toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
+// The absolute instant a match kicks off, as a Date.
+function instantOf(m) {
+    if (m.instant) return m.instant;
+    return m.kickoffISO ? new Date(m.kickoffISO) : kickoffInstant(m.date, m.time);
 }
 
-function fmtLocalDateTime(dateStr, timeStr) {
-    const inst = kickoffInstant(dateStr, timeStr);
+function tournamentDay() {
+    const today = new Date(todayDate + 'T00:00:00');
+    return Math.floor((today - startDate) / 86400000) + 1;
+}
+
+// Display helpers take a match and render its instant in the viewer's local zone.
+function fmtLocalTime(m) {
+    return instantOf(m).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
+}
+
+function fmtLocalDate(m) {
+    return instantOf(m).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+}
+
+function fmtLocalDateTime(m) {
+    const inst = instantOf(m);
     const date = inst.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
     const time = inst.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true, timeZoneName: 'short' });
     return `${date} · ${time}`;
 }
 
-function fmtLocalDate(dateStr, timeStr) {
-    return kickoffInstant(dateStr, timeStr)
-        .toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+// YYYY-MM-DD calendar date of the kickoff in the viewer's local zone (sortable/comparable).
+function localDateKey(m) {
+    return instantOf(m).toLocaleDateString('en-CA');
 }
 
-// YYYY-MM-DD calendar date of a kickoff in the viewer's local zone (sortable/comparable).
-function localDateKey(dateStr, timeStr) {
-    return kickoffInstant(dateStr, timeStr).toLocaleDateString('en-CA');
+function minutesUntil(m) {
+    return Math.round((instantOf(m) - NOW_INSTANT) / 60000);
 }
 
-// The simulated "now" (TOURNAMENT.today + nowHHMM is Eastern), expressed as the
-// viewer's local calendar date — so day grouping matches the localized kickoff dates.
-const LOCAL_TODAY = localDateKey(todayDate, TOURNAMENT.nowHHMM);
-
-function minutesUntil(date, time) {
-    const target = new Date(`${date}T${time}:00`);
-    const now = new Date(`${todayDate}T${TOURNAMENT.nowHHMM}:00`);
-    return Math.round((target - now) / 60000);
-}
-
-function relativeUntil(date, time) {
-    const mins = minutesUntil(date, time);
+function relativeUntil(m) {
+    const mins = minutesUntil(m);
     if (mins < 0) return '';
     if (mins < 60) return `in ${mins}m`;
     if (mins < 24 * 60) return `in ${Math.floor(mins / 60)}h ${mins % 60}m`;
@@ -183,14 +182,14 @@ function matchCard(m) {
         statusHtml = `<span class="live-tag"><span class="live-dot"></span>LIVE · ${m.liveMinute}'</span>`;
     } else if (m.status === 'finished') {
         scoreHtml = `<div class="mc-score">${m.homeScore} – ${m.awayScore}</div>`;
-        statusHtml = `<span>FT · ${fmtLocalDate(m.date, m.time)}</span>`;
+        statusHtml = `<span>FT · ${fmtLocalDate(m)}</span>`;
     } else {
-        scoreHtml = `<div class="mc-score"><span class="vs">${fmtLocalTime(m.date, m.time)}</span></div>`;
-        statusHtml = `<span>${fmtLocalDate(m.date, m.time)}</span>`;
+        scoreHtml = `<div class="mc-score"><span class="vs">${fmtLocalTime(m)}</span></div>`;
+        statusHtml = `<span>${fmtLocalDate(m)}</span>`;
     }
 
-    const countdownHtml = m.status === 'upcoming' && (localDateKey(m.date, m.time) === LOCAL_TODAY || minutesUntil(m.date, m.time) <= 24 * 60)
-        ? `<span class="mc-countdown">${relativeUntil(m.date, m.time)}</span>`
+    const countdownHtml = m.status === 'upcoming' && (localDateKey(m) === LOCAL_TODAY || minutesUntil(m) <= 24 * 60)
+        ? `<span class="mc-countdown">${relativeUntil(m)}</span>`
         : '';
 
     return `
@@ -234,17 +233,17 @@ function renderLiveSection() {
     const byFavThenTime = (a, b) => {
         const fa = isFavMatch(a), fb = isFavMatch(b);
         if (fa !== fb) return fa ? -1 : 1;
-        return (a.date + a.time).localeCompare(b.date + b.time);
+        return instantOf(a) - instantOf(b);
     };
 
     const live = MATCHES.filter(m => m.status === 'live' && matchPasses(m));
-    const today = MATCHES.filter(m => m.status !== 'finished' && m.status !== 'live' && localDateKey(m.date, m.time) === LOCAL_TODAY && matchPasses(m))
+    const today = MATCHES.filter(m => m.status !== 'finished' && m.status !== 'live' && localDateKey(m) === LOCAL_TODAY && matchPasses(m))
         .sort(byFavThenTime);
-    const upcoming = MATCHES.filter(m => m.status === 'upcoming' && localDateKey(m.date, m.time) > LOCAL_TODAY && matchPasses(m))
+    const upcoming = MATCHES.filter(m => m.status === 'upcoming' && localDateKey(m) > LOCAL_TODAY && matchPasses(m))
         .sort(byFavThenTime)
         .slice(0, 12);
     const finished = MATCHES.filter(m => m.status === 'finished' && matchPasses(m))
-        .sort((a, b) => (b.date + b.time).localeCompare(a.date + a.time))
+        .sort((a, b) => instantOf(b) - instantOf(a))
         .slice(0, 8);
 
     const fill = (id, list, emptyMsg) => {
@@ -431,8 +430,8 @@ function openMatchModal(matchId) {
 
     let statusLine;
     if (m.status === 'live') statusLine = `<span class="live-tag"><span class="live-dot"></span>LIVE · ${m.liveMinute}'</span>`;
-    else if (m.status === 'finished') statusLine = `Full Time · ${fmtLocalDateTime(m.date, m.time)}`;
-    else statusLine = `Kick off ${fmtLocalDateTime(m.date, m.time)}`;
+    else if (m.status === 'finished') statusLine = `Full Time · ${fmtLocalDateTime(m)}`;
+    else statusLine = `Kick off ${fmtLocalDateTime(m)}`;
 
     const scoreDisplay = (m.status === 'live' || m.status === 'finished')
         ? `${m.homeScore} <span class="vs">–</span> ${m.awayScore}`
@@ -563,58 +562,190 @@ function startLiveTicker() {
     }, 10000);
 }
 
-// ===== INIT =====
-function init() {
-    // header bar
+// ===== LIVE DATA SOURCE: openfootball (with bundled fallback) =====
+// Public-domain World Cup 2026 JSON, served via jsDelivr (CORS + CDN cache).
+const OF_BASE = 'https://cdn.jsdelivr.net/gh/openfootball/worldcup.json@master/2026';
+
+// openfootball grounds (host city, sometimes with a borough in parens) → stadium label.
+const STADIUMS = {
+    'Atlanta': 'Mercedes-Benz Stadium, Atlanta',
+    'Boston': 'Gillette Stadium, Boston',
+    'Dallas': 'AT&T Stadium, Dallas',
+    'Houston': 'NRG Stadium, Houston',
+    'Kansas City': 'Arrowhead Stadium, Kansas City',
+    'Los Angeles': 'SoFi Stadium, Los Angeles',
+    'Miami': 'Hard Rock Stadium, Miami',
+    'New York/New Jersey': 'MetLife Stadium, New York/NJ',
+    'Philadelphia': 'Lincoln Financial Field, Philadelphia',
+    'San Francisco Bay Area': "Levi's Stadium, San Francisco Bay Area",
+    'Seattle': 'Lumen Field, Seattle',
+    'Toronto': 'BMO Field, Toronto',
+    'Vancouver': 'BC Place, Vancouver',
+    'Guadalajara': 'Estadio Akron, Guadalajara',
+    'Mexico City': 'Estadio Azteca, Mexico City',
+    'Monterrey': 'Estadio BBVA, Monterrey',
+};
+function groundToVenue(ground) {
+    const key = String(ground || '').split('(')[0].trim();
+    return STADIUMS[key] || ground || 'TBD';
+}
+
+// Normalize a team name for matching (strip accents, punctuation, case).
+const normName = (s) => String(s).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z]/g, '');
+
+// "15:00 UTC-4" → { time: "15:00", kickoffISO: "2026-06-12T15:00:00-04:00" }
+function parseKickoff(dateStr, timeStr) {
+    const m = String(timeStr).match(/(\d{1,2}):(\d{2})\s*UTC\s*([+-]\d{1,2})(?::?(\d{2}))?/i);
+    if (!m) return { time: '00:00', kickoffISO: `${dateStr}T00:00:00Z` };
+    const hh = m[1].padStart(2, '0'), mm = m[2];
+    const sign = m[3][0];
+    const oh = String(Math.abs(parseInt(m[3], 10))).padStart(2, '0');
+    const om = (m[4] || '00').padStart(2, '0');
+    return { time: `${hh}:${mm}`, kickoffISO: `${dateStr}T${hh}:${mm}:00${sign}${oh}:${om}` };
+}
+
+// Map openfootball teams.json + worldcup.json into the app's {tournament, teams, matches}.
+function mapOpenfootball(teamsJson, fixturesJson) {
+    const teams = teamsJson.map(t => ({
+        code: t.fifa_code, name: t.name, group: t.group, flag: t.flag_icon, confed: t.confed,
+    }));
+    const nameToCode = {};
+    for (const t of teamsJson) {
+        nameToCode[normName(t.name)] = t.fifa_code;
+        if (t.name_normalised) nameToCode[normName(t.name_normalised)] = t.fifa_code;
+        nameToCode[normName(t.fifa_code)] = t.fifa_code;
+    }
+
+    const matches = [];
+    let i = 0, skipped = 0;
+    for (const mt of (fixturesJson.matches || [])) {
+        if (!/^Group\s/i.test(mt.group || '')) continue; // group stage only; the app builds its own bracket
+        const home = nameToCode[normName(mt.team1)];
+        const away = nameToCode[normName(mt.team2)];
+        if (!home || !away) { skipped++; continue; } // placeholder/qualifier rows
+        const { time, kickoffISO } = parseKickoff(mt.date, mt.time);
+        matches.push({
+            id: `wc${i++}`,
+            group: String(mt.group).replace(/^Group\s+/i, ''),
+            home, away, date: mt.date, time, kickoffISO,
+            venue: groundToVenue(mt.ground),
+            status: 'upcoming', // openfootball 2026 is fixtures-only (no scores yet)
+        });
+    }
+    if (skipped) console.warn(`openfootball: skipped ${skipped} non-group/unmapped matches`);
+
+    const now = new Date();
+    const tournament = {
+        startDate: '2026-06-11',
+        finalDate: '2026-07-19',
+        today: now.toLocaleDateString('en-CA'),
+        nowISO: now.toISOString(),
+    };
+    return { tournament, teams, matches };
+}
+
+async function loadLiveData() {
+    const [teams, fixtures] = await Promise.all([
+        fetch(`${OF_BASE}/worldcup.teams.json`).then(r => { if (!r.ok) throw new Error('teams ' + r.status); return r.json(); }),
+        fetch(`${OF_BASE}/worldcup.json`).then(r => { if (!r.ok) throw new Error('fixtures ' + r.status); return r.json(); }),
+    ]);
+    const data = mapOpenfootball(teams, fixtures);
+    if (data.teams.length < 24 || data.matches.length < 48) throw new Error('incomplete openfootball data');
+    return data;
+}
+
+// Install a dataset and derive everything dependent on it.
+function setDataset(data) {
+    TOURNAMENT = data.tournament;
+    TEAMS = data.teams;
+    MATCHES = data.matches;
+    TEAM = Object.fromEntries(TEAMS.map(t => [t.code, t]));
+    for (const m of MATCHES) m.instant = m.kickoffISO ? new Date(m.kickoffISO) : kickoffInstant(m.date, m.time);
+    todayDate = TOURNAMENT.today;
+    startDate = new Date(TOURNAMENT.startDate + 'T00:00:00');
+    NOW_INSTANT = TOURNAMENT.nowISO ? new Date(TOURNAMENT.nowISO) : kickoffInstant(TOURNAMENT.today, TOURNAMENT.nowHHMM);
+    LOCAL_TODAY = NOW_INSTANT.toLocaleDateString('en-CA');
+}
+
+// ===== SKELETON LOADING =====
+function skeletonCard() {
+    return `<div class="match-card sk-card" aria-hidden="true">
+        <div class="sk-row"><span class="sk sk-pill"></span><span class="sk sk-pill sk-pill-sm"></span></div>
+        <div class="sk-teamrow">
+            <span class="sk sk-flag"></span><span class="sk sk-bar sk-grow"></span>
+            <span class="sk sk-bar sk-score"></span>
+            <span class="sk sk-bar sk-grow"></span><span class="sk sk-flag"></span>
+        </div>
+        <span class="sk sk-bar sk-foot"></span>
+    </div>`;
+}
+function showSkeletons() {
+    const cards = (k) => Array.from({ length: k }, skeletonCard).join('');
+    $('#liveMatches').innerHTML = `<div class="empty-state">Loading schedule…</div>`;
+    $('#todayMatches').innerHTML = cards(2);
+    $('#upcomingMatches').innerHTML = cards(6);
+    $('#finishedMatches').innerHTML = '';
+    const row = `<div class="sk-teamrow" style="margin:.55rem 0"><span class="sk sk-flag"></span><span class="sk sk-bar sk-grow"></span><span class="sk sk-bar sk-num"></span></div>`;
+    const grp = `<div class="group-card" aria-hidden="true"><span class="sk sk-bar sk-title"></span>${row.repeat(4)}</div>`;
+    $('#groupsGrid').innerHTML = grp.repeat(4);
+}
+
+function setFooterNote(live) {
+    const el = $('#footerNote');
+    if (!el) return;
+    el.innerHTML = live
+        ? 'Live schedule via <a href="https://github.com/openfootball/worldcup.json" target="_blank" rel="noopener">openfootball</a> · public-domain World Cup 2026 data.'
+        : 'Live source unavailable — showing bundled sample data.';
+}
+
+let tickerStarted = false;
+function renderAll() {
     $('#tournamentDay').textContent = `Day ${tournamentDay()} of 39`;
-    $('#todayDate').textContent = fmtLocalDate(todayDate, TOURNAMENT.nowHHMM);
-
-    initTheme();
-
+    $('#todayDate').textContent = NOW_INSTANT.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
     STATE.standings = computeStandings();
-
     renderLiveSection();
     renderGroups();
     renderBracket();
     renderScorers();
     renderFavorites();
+    if (!tickerStarted) { startLiveTicker(); tickerStarted = true; }
+}
 
-    // nav
-    $$('.nav-link').forEach(l => {
-        l.addEventListener('click', e => {
-            e.preventDefault();
-            setSection(l.dataset.section);
-        });
-    });
-
-    // filter chips
-    $$('.filter-chip').forEach(c => {
-        c.addEventListener('click', () => {
-            $$('.filter-chip').forEach(x => x.classList.remove('active'));
-            c.classList.add('active');
-            STATE.filter = c.dataset.filter;
-            renderLiveSection();
-        });
-    });
-
-    // match card clicks (delegated)
+// One-time wiring that needs no data.
+function initChrome() {
+    initTheme();
+    $$('.nav-link').forEach(l => l.addEventListener('click', e => { e.preventDefault(); setSection(l.dataset.section); }));
+    $$('.filter-chip').forEach(c => c.addEventListener('click', () => {
+        $$('.filter-chip').forEach(x => x.classList.remove('active'));
+        c.classList.add('active');
+        STATE.filter = c.dataset.filter;
+        renderLiveSection();
+    }));
     document.addEventListener('click', e => {
         const card = e.target.closest('.match-card');
-        if (card) openMatchModal(card.dataset.match);
+        if (card && card.dataset.match) openMatchModal(card.dataset.match);
         const fav = e.target.closest('.fav-tile');
         if (fav) toggleFavorite(fav.dataset.fav);
     });
-
-    // modal close
     $('#modalClose').addEventListener('click', closeModal);
-    $('#modalBackdrop').addEventListener('click', e => {
-        if (e.target.id === 'modalBackdrop') closeModal();
-    });
-    document.addEventListener('keydown', e => {
-        if (e.key === 'Escape') closeModal();
-    });
-
-    startLiveTicker();
+    $('#modalBackdrop').addEventListener('click', e => { if (e.target.id === 'modalBackdrop') closeModal(); });
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
 }
 
-document.addEventListener('DOMContentLoaded', init);
+async function boot() {
+    initChrome();
+    showSkeletons();
+    let data, live = true;
+    try {
+        data = await loadLiveData();
+    } catch (e) {
+        console.warn('Live data unavailable; using bundled sample:', e);
+        data = FALLBACK_DATA;
+        live = false;
+    }
+    setDataset(data);
+    renderAll();
+    setFooterNote(live);
+}
+
+document.addEventListener('DOMContentLoaded', boot);

@@ -698,6 +698,35 @@ footer {
 
 footer code { background: rgba(255,255,255,.1); color: var(--wc-gold); }
 
+/* SKELETON LOADING */
+:root { --sk-base: #e7e8ef; --sk-hi: #f3f4f8; }
+:root[data-theme="dark"] { --sk-base: #232733; --sk-hi: #2f3543; }
+
+@keyframes sk-shimmer {
+    0%   { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+}
+.sk {
+    display: inline-block;
+    background: linear-gradient(90deg, var(--sk-base) 25%, var(--sk-hi) 50%, var(--sk-base) 75%);
+    background-size: 200% 100%;
+    animation: sk-shimmer 1.3s ease-in-out infinite;
+    border-radius: 6px;
+}
+.sk-card { cursor: default; pointer-events: none; }
+.sk-card .sk-row { display: flex; justify-content: space-between; margin-bottom: 1rem; }
+.sk-pill { width: 90px; height: 14px; border-radius: 999px; }
+.sk-pill-sm { width: 60px; }
+.sk-teamrow { display: flex; align-items: center; gap: .55rem; }
+.sk-flag { width: 28px; height: 20px; border-radius: 3px; flex-shrink: 0; }
+.sk-bar { height: 12px; }
+.sk-grow { flex: 1; }
+.sk-score { width: 46px; height: 18px; }
+.sk-num { width: 26px; }
+.sk-foot { display: block; width: 60%; height: 10px; margin-top: 1rem; }
+.sk-title { display: block; width: 45%; height: 16px; margin-bottom: 1rem; }
+@media (prefers-reduced-motion: reduce) { .sk { animation: none; } }
+
 /* RESPONSIVE */
 
 /* Tablets / large phones: collapse multi-column grids to one column. */

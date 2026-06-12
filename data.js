@@ -6,7 +6,9 @@
 // Fixtures, kick-off times and venues sourced from ESPN/FIFA published schedule.
 // June 11 results (Group A) are real; June 12 onward have not yet been played.
 
-const TOURNAMENT = {
+// Bundled sample dataset — used as an offline fallback when the live
+// openfootball feed can't be reached (see app.js boot()).
+const FB_TOURNAMENT = {
     startDate: '2026-06-11',
     finalDate: '2026-07-19',
     today: '2026-06-12',
@@ -34,7 +36,7 @@ const V = {
 };
 
 // Official Dec 5, 2025 draw
-const TEAMS = [
+const FB_TEAMS = [
     // Group A
     { code: 'MEX', name: 'Mexico',                 group: 'A', flag: '🇲🇽', confed: 'CONCACAF' },
     { code: 'RSA', name: 'South Africa',           group: 'A', flag: '🇿🇦', confed: 'CAF' },
@@ -97,8 +99,6 @@ const TEAMS = [
     { code: 'PAN', name: 'Panama',                 group: 'L', flag: '🇵🇦', confed: 'CONCACAF' },
 ];
 
-const TEAM = Object.fromEntries(TEAMS.map(t => [t.code, t]));
-
 // Event shorthand
 const g  = (min, side, player, assist) => ({ min, type: 'goal',   side, player, assist });
 const y  = (min, side, player)         => ({ min, type: 'yellow', side, player });
@@ -106,7 +106,7 @@ const r  = (min, side, player)         => ({ min, type: 'red',    side, player }
 
 // All 72 group-stage matches.
 // All times are Eastern. Times for Mexican venues are local converted to ET.
-const MATCHES = [
+const FB_MATCHES = [
     // ============ MATCHDAY 1 ============
 
     // June 11 — Group A (only matches played so far)
@@ -231,3 +231,6 @@ const MATCHES = [
     { id: 'L5', group: 'L', home: 'PAN', away: 'ENG', date: '2026-06-25', time: '17:00', venue: V.NYC, status: 'upcoming' },
     { id: 'L6', group: 'L', home: 'CRO', away: 'GHA', date: '2026-06-25', time: '17:00', venue: V.PHI, status: 'upcoming' },
 ];
+
+// Offline fallback dataset consumed by app.js when the live feed is unavailable.
+const FALLBACK_DATA = { tournament: FB_TOURNAMENT, teams: FB_TEAMS, matches: FB_MATCHES };
