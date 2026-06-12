@@ -698,6 +698,8 @@ footer {
 
 footer code { background: rgba(255,255,255,.1); color: var(--wc-gold); }
 
+.stats-head { text-transform: uppercase; font-size: .8rem; letter-spacing: 1px; color: var(--text-muted); margin-bottom: .75rem; display: flex; gap: .5rem; align-items: baseline; flex-wrap: wrap; }
+
 /* ILLUSTRATIVE PASSING MAP */
 .pitch-wrap { margin-top: 1.5rem; }
 .pitch-head { display: flex; justify-content: space-between; align-items: baseline; gap: .5rem; margin-bottom: .45rem; }

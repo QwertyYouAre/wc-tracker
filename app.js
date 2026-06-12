@@ -508,6 +508,24 @@ function startPitch(seedStr) {
     pitchTimer = setInterval(step, 1300);
 }
 
+// Synthetic, deterministic match stats (no free 2026 stats source exists).
+// Clearly labelled "Illustrative" wherever shown.
+function syntheticStats(m) {
+    let seed = 0;
+    for (const ch of String(m.id)) seed = (seed * 31 + ch.charCodeAt(0)) >>> 0;
+    const rnd = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+    const between = (lo, hi) => Math.floor(lo + rnd() * (hi - lo + 1));
+    const possH = between(38, 62);
+    const shotsH = between(5, 16), shotsA = between(5, 16);
+    return {
+        poss: [possH, 100 - possH],
+        shots: [shotsH, shotsA],
+        onTarget: [between(1, Math.max(1, Math.round(shotsH * 0.6))), between(1, Math.max(1, Math.round(shotsA * 0.6)))],
+        corners: [between(1, 9), between(1, 9)],
+        fouls: [between(6, 16), between(6, 16)],
+    };
+}
+
 // ===== MATCH MODAL =====
 function openMatchModal(matchId) {
     const m = MATCHES.find(x => x.id === matchId);
@@ -523,19 +541,17 @@ function openMatchModal(matchId) {
         ? `${m.homeScore} <span class="vs">–</span> ${m.awayScore}`
         : `<span class="vs">vs</span>`;
 
-    const stats = m.stats;
+    const live = m.status === 'live' || m.status === 'finished';
+    const synthetic = !m.stats && live;
+    const stats = m.stats || (synthetic ? syntheticStats(m) : null);
     const statsHtml = stats ? `
-        <h4 style="text-transform:uppercase;font-size:.8rem;letter-spacing:1px;color:var(--text-muted);margin-bottom:.75rem;">Match Stats</h4>
+        <h4 class="stats-head">Match Stats${synthetic ? ' <span class="pitch-note">⚠ Illustrative</span>' : ''}</h4>
         ${statRow('Possession %', stats.poss[0], stats.poss[1])}
         ${statRow('Shots', stats.shots[0], stats.shots[1])}
         ${statRow('Shots on Target', stats.onTarget[0], stats.onTarget[1])}
         ${statRow('Corners', stats.corners[0], stats.corners[1])}
         ${statRow('Fouls', stats.fouls[0], stats.fouls[1])}
-    ` : `<p class="muted" style="text-align:center;padding:1rem 0;">${
-        (m.status === 'live' || m.status === 'finished')
-            ? "Detailed stats aren't available from the current data source."
-            : 'Stats available once the match starts.'
-    }</p>`;
+    ` : '<p class="muted" style="text-align:center;padding:1rem 0;">Stats available once the match starts.</p>';
 
     const eventsHtml = (m.events && m.events.length) ? `
         <div class="timeline">
