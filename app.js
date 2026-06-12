@@ -440,20 +440,11 @@ function toggleFavorite(code) {
 }
 
 // ===== MATCH MODAL =====
-function openMatchModal(matchId) {
-    const m = MATCHES.find(x => x.id === matchId);
-    if (!m) return;
+let openMatchId = null;
+
+// The stats + events portion of the modal (re-rendered after ESPN detail loads).
+function modalDetailHtml(m) {
     const home = TEAM[m.home], away = TEAM[m.away];
-
-    let statusLine;
-    if (m.status === 'live') statusLine = `<span class="live-tag"><span class="live-dot"></span>${liveLabel(m)}</span>`;
-    else if (m.status === 'finished') statusLine = `Full Time · ${fmtLocalDateTime(m)}`;
-    else statusLine = `Kick off ${fmtLocalDateTime(m)}`;
-
-    const scoreDisplay = (m.status === 'live' || m.status === 'finished')
-        ? `${m.homeScore} <span class="vs">–</span> ${m.awayScore}`
-        : `<span class="vs">vs</span>`;
-
     const stats = m.stats;
     const statsHtml = stats ? `
         <h4 class="stats-head">Match Stats</h4>
@@ -464,22 +455,24 @@ function openMatchModal(matchId) {
         ${statRow('Fouls', stats.fouls[0], stats.fouls[1])}
     ` : `<p class="muted" style="text-align:center;padding:1rem 0;">${
         (m.status === 'live' || m.status === 'finished')
-            ? "Detailed stats aren't available from the current data source."
+            ? (m.espnLoaded ? "Detailed stats aren't available for this match." : 'Loading match stats…')
             : 'Stats available once the match starts.'
     }</p>`;
 
-    const eventsHtml = (m.events && m.events.length) ? `
+    const evList = m.espnEvents || m.events;
+    const eventsHtml = (evList && evList.length) ? `
         <div class="timeline">
             <h4>Match Events</h4>
-            ${m.events.slice().sort((a, b) => a.min - b.min).map(ev => {
+            ${evList.slice().sort((a, b) => a.min - b.min).map(ev => {
                 const team = ev.side === 'home' ? home : away;
-                const icon = ev.type === 'goal' ? '⚽' : ev.type === 'og' ? '🥅' : ev.type === 'yellow' ? '🟨' : ev.type === 'red' ? '🟥' : ev.type === 'penalty' ? '⚽' : '•';
+                const icon = ev.type === 'goal' ? '⚽' : ev.type === 'og' ? '🥅' : ev.type === 'yellow' ? '🟨' : ev.type === 'red' ? '🟥' : ev.type === 'sub' ? '🔄' : ev.type === 'penalty' ? '⚽' : '•';
                 const text = ev.type === 'goal'
-                    ? `<strong>GOAL</strong> · ${ev.player}${ev.assist ? ` <span class="muted">(assist: ${ev.assist})</span>` : ''}`
-                    : ev.type === 'og' ? `<strong>OWN GOAL</strong> · ${ev.player}`
-                    : ev.type === 'yellow' ? `Yellow card · ${ev.player}`
-                    : ev.type === 'red' ? `<strong>RED CARD</strong> · ${ev.player}`
-                    : `${ev.type} · ${ev.player}`;
+                    ? `<strong>GOAL</strong>${ev.player ? ' · ' + ev.player : ''}${ev.assist ? ` <span class="muted">(assist: ${ev.assist})</span>` : ''}`
+                    : ev.type === 'og' ? `<strong>OWN GOAL</strong>${ev.player ? ' · ' + ev.player : ''}`
+                    : ev.type === 'yellow' ? `Yellow card${ev.player ? ' · ' + ev.player : ''}`
+                    : ev.type === 'red' ? `<strong>RED CARD</strong>${ev.player ? ' · ' + ev.player : ''}`
+                    : ev.type === 'sub' ? `Substitution${ev.player ? ' · ' + ev.player : ''}`
+                    : `${ev.type}${ev.player ? ' · ' + ev.player : ''}`;
                 return `<div class="tl-event">
                     <span class="tl-min">${ev.min}'</span>
                     <span class="tl-icon">${icon}</span>
@@ -487,6 +480,38 @@ function openMatchModal(matchId) {
                 </div>`;
             }).join('')}
         </div>` : (m.status === 'upcoming' ? '<p class="muted" style="text-align:center;padding:1rem 0;">Live commentary begins at kick-off.</p>' : '');
+
+    return statsHtml + eventsHtml;
+}
+
+// Lazily fetch real stats + events from ESPN for the open match.
+async function loadEspnDetail(m) {
+    if (m.espnLoaded || !m.espnId || (m.status !== 'live' && m.status !== 'finished')) return;
+    try {
+        const r = await fetch(`${ESPN_BASE}/summary?event=${m.espnId}`, { cache: 'no-store' });
+        if (r.ok) applyEspnSummary(m, await r.json());
+    } catch (e) { /* keep graceful */ }
+    m.espnLoaded = true;
+    const detail = document.getElementById('modalDetail');
+    if (detail && openMatchId === m.id && $('#modalBackdrop').classList.contains('open')) {
+        detail.innerHTML = modalDetailHtml(m);
+    }
+}
+
+function openMatchModal(matchId) {
+    const m = MATCHES.find(x => x.id === matchId);
+    if (!m) return;
+    openMatchId = m.id;
+    const home = TEAM[m.home], away = TEAM[m.away];
+
+    let statusLine;
+    if (m.status === 'live') statusLine = `<span class="live-tag"><span class="live-dot"></span>${liveLabel(m)}</span>`;
+    else if (m.status === 'finished') statusLine = `Full Time · ${fmtLocalDateTime(m)}`;
+    else statusLine = `Kick off ${fmtLocalDateTime(m)}`;
+
+    const scoreDisplay = (m.status === 'live' || m.status === 'finished')
+        ? `${m.homeScore} <span class="vs">–</span> ${m.awayScore}`
+        : `<span class="vs">vs</span>`;
 
     $('#modalBody').innerHTML = `
         <div class="modal-header">
@@ -507,13 +532,11 @@ function openMatchModal(matchId) {
             </div>
             <div class="mh-status">${statusLine}</div>
         </div>
-        <div class="modal-body">
-            ${statsHtml}
-            ${eventsHtml}
-        </div>
+        <div class="modal-body" id="modalDetail">${modalDetailHtml(m)}</div>
     `;
     $('#modalBackdrop').classList.add('open');
     $('#modalBackdrop').setAttribute('aria-hidden', 'false');
+    loadEspnDetail(m);
 }
 
 function statRow(label, l, r) {
@@ -533,6 +556,7 @@ function statRow(label, l, r) {
 }
 
 function closeModal() {
+    openMatchId = null;
     $('#modalBackdrop').classList.remove('open');
     $('#modalBackdrop').setAttribute('aria-hidden', 'true');
 }
@@ -745,8 +769,104 @@ async function refreshScores() {
     if (!payload || !payload.ok) return;
     scoresOn = true;
     const changed = mergeScores(payload);
-    setFooterNote(true, true);
+    setFooterNote(true, 'football-data');
     if (changed) renderAll();
+}
+
+// ===== LIVE DATA: ESPN (primary) =====
+// ESPN's public, keyless, CORS-open API covers the live tournament with real
+// scores, minute, stats and events. Called directly from the browser. Its team
+// abbreviations match the app's FIFA codes exactly.
+const ESPN_BASE = 'https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world';
+const ESPN_STATE = { in: 'live', post: 'finished' };
+
+async function refreshESPN() {
+    let data;
+    try {
+        const r = await fetch(`${ESPN_BASE}/scoreboard?dates=20260611-20260719&limit=400`, { cache: 'no-store' });
+        if (!r.ok) return false;
+        data = await r.json();
+    } catch (e) { return false; }
+
+    const byPair = new Map();
+    for (const m of MATCHES) byPair.set(pairKey(m.home, m.away), m);
+    let applied = 0;
+    for (const ev of (data.events || [])) {
+        const comp = ev.competitions && ev.competitions[0];
+        const cs = (comp && comp.competitors) || [];
+        if (cs.length < 2) continue;
+        const ab0 = cs[0].team.abbreviation, ab1 = cs[1].team.abbreviation;
+        const m = byPair.get(pairKey(ab0, ab1));
+        if (!m) continue;
+        const st = ESPN_STATE[ev.status.type.state];
+        if (!st) continue; // 'pre' → leave upcoming
+        const score = {}; score[ab0] = parseInt(cs[0].score, 10); score[ab1] = parseInt(cs[1].score, 10);
+        if (isNaN(score[m.home]) || isNaN(score[m.away])) continue;
+        m.homeScore = score[m.home]; m.awayScore = score[m.away];
+        m.status = st;
+        m.espnId = ev.id;
+        if (st === 'live') {
+            m.espnLoaded = false; // refetch detail on next open (stats change)
+            const dc = ev.status.displayClock || (ev.status.type && ev.status.type.detail) || '';
+            const mm = String(dc).match(/(\d+)/);
+            m.apiMinute = mm ? parseInt(mm[1], 10) : null;
+        }
+        applied++;
+    }
+    setFooterNote(true, 'espn');
+    if (applied) renderAll();
+    return true;
+}
+
+// Parse an ESPN match summary into the app's stats + events shape.
+function applyEspnSummary(m, sum) {
+    const teams = (sum.boxscore && sum.boxscore.teams) || [];
+    const pick = (arr, name) => {
+        const s = (arr || []).find(x => x.name === name);
+        if (!s) return null;
+        const v = parseFloat(String(s.displayValue != null ? s.displayValue : s.value));
+        return isNaN(v) ? null : v;
+    };
+    const out = { poss: [0, 0], shots: [0, 0], onTarget: [0, 0], corners: [0, 0], fouls: [0, 0] };
+    let any = false;
+    for (const t of teams) {
+        const i = (t.team && t.team.abbreviation) === m.away ? 1 : 0;
+        const sa = t.statistics || [];
+        if (sa.length) any = true;
+        const p = pick(sa, 'possessionPct'); if (p != null) out.poss[i] = p;
+        out.shots[i] = pick(sa, 'totalShots') || 0;
+        out.onTarget[i] = pick(sa, 'shotsOnTarget') || 0;
+        out.corners[i] = pick(sa, 'wonCorners') || 0;
+        out.fouls[i] = pick(sa, 'foulsCommitted') || 0;
+    }
+    if (any) m.stats = out;
+
+    const comp = ((sum.header && sum.header.competitions) || [])[0];
+    const idToCode = {};
+    if (comp) for (const c of (comp.competitors || [])) idToCode[c.id] = c.team.abbreviation;
+    const evs = [];
+    for (const e of (sum.keyEvents || [])) {
+        const tyt = (e.type && e.type.text) || '';
+        let type = null;
+        if (/own goal/i.test(tyt)) type = 'og';
+        else if (/goal/i.test(tyt)) type = 'goal';
+        else if (/yellow card/i.test(tyt)) type = 'yellow';
+        else if (/red card/i.test(tyt)) type = 'red';
+        else if (/substitut/i.test(tyt)) type = 'sub';
+        if (!type) continue;
+        const side = idToCode[e.team && e.team.id] === m.away ? 'away' : 'home';
+        const min = parseInt(String((e.clock && e.clock.displayValue) || '').replace(/\D+/g, ''), 10) || 0;
+        const text = e.text || '';
+        let player = null, assist = null;
+        if (type === 'goal' || type === 'og') {
+            const mm = text.match(/\d\.\s*([^(.]+?)\s*\(/); if (mm) player = mm[1].trim();
+            const am = text.match(/assisted by ([^.]+?)\./i); if (am) assist = am[1].trim();
+        } else {
+            const mm = text.match(/^\s*([^(]+?)\s*\(/); if (mm) player = mm[1].trim();
+        }
+        evs.push({ min, type, side, player, assist });
+    }
+    if (evs.length) m.espnEvents = evs;
 }
 
 // ===== SKELETON LOADING =====
@@ -772,14 +892,14 @@ function showSkeletons() {
     $('#groupsGrid').innerHTML = grp.repeat(4);
 }
 
-function setFooterNote(live, withScores) {
+function setFooterNote(live, source) {
     const el = $('#footerNote');
     if (!el) return;
     if (!live) { el.textContent = 'Live source unavailable — showing bundled sample data.'; return; }
-    const schedule = 'Live schedule via <a href="https://github.com/openfootball/worldcup.json" target="_blank" rel="noopener">openfootball</a>';
-    el.innerHTML = withScores
-        ? `${schedule} · live scores via <a href="https://www.football-data.org" target="_blank" rel="noopener">football-data.org</a>.`
-        : `${schedule} · public-domain World Cup 2026 data.`;
+    const schedule = 'Schedule via <a href="https://github.com/openfootball/worldcup.json" target="_blank" rel="noopener">openfootball</a>';
+    if (source === 'espn') el.innerHTML = `${schedule} · live scores &amp; stats via <a href="https://www.espn.com/soccer/" target="_blank" rel="noopener">ESPN</a>.`;
+    else if (source === 'football-data') el.innerHTML = `${schedule} · live scores via <a href="https://www.football-data.org" target="_blank" rel="noopener">football-data.org</a>.`;
+    else el.innerHTML = `${schedule} · public-domain World Cup 2026 data.`;
 }
 
 let tickerStarted = false;
@@ -829,13 +949,17 @@ async function boot() {
     }
     setDataset(data);
     renderAll();
-    setFooterNote(live, false);
+    setFooterNote(live, null);
 
-    // Layer live scores from football-data.org (via the serverless proxy) over the
-    // openfootball schedule, then keep them fresh. No-op if the proxy isn't configured.
+    // Layer real live scores/stats over the openfootball schedule and keep them
+    // fresh. ESPN (keyless, has stats + events) is primary; football-data is the
+    // fallback. Both no-op gracefully if unreachable.
     if (live) {
-        refreshScores();
-        setInterval(refreshScores, 60000);
+        const useEspn = await refreshESPN();
+        if (!useEspn) await refreshScores();
+        setInterval(() => {
+            refreshESPN().then(ok => { if (!ok) refreshScores(); });
+        }, 60000);
     }
 }
 
