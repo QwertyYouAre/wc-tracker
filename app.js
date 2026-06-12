@@ -170,8 +170,22 @@ function computeScorers() {
         .sort((a, b) => b.goals - a.goals || a.player.localeCompare(b.player));
 }
 
-// "LIVE · 63'" when the minute is known, otherwise just "LIVE".
-const liveLabel = (m) => (m.liveMinute ? `LIVE · ${m.liveMinute}'` : 'LIVE');
+// Rough live minute estimated from kickoff (football-data's list endpoint omits it).
+// Approximates the ~15-min half-time break; not exact during stoppage time.
+function estimateMinute(m) {
+    const elapsed = Math.floor((Date.now() - instantOf(m).getTime()) / 60000);
+    if (elapsed < 0) return null;
+    if (elapsed <= 45) return elapsed;   // first half
+    if (elapsed <= 60) return 45;        // half-time window
+    return Math.min(elapsed - 15, 91);   // second half (minus the break)
+}
+
+// "LIVE · 63'" / "LIVE · 90+'" when the minute is known or can be estimated, else "LIVE".
+function liveLabel(m) {
+    const min = m.apiMinute ?? estimateMinute(m);
+    if (min == null) return 'LIVE';
+    return min > 90 ? "LIVE · 90+'" : `LIVE · ${min}'`;
+}
 
 // ===== MATCH CARD =====
 function matchCard(m) {
@@ -550,20 +564,12 @@ function setSection(name) {
 
 // ===== LIVE MINUTE TICKER =====
 function startLiveTicker() {
+    // Re-render live cards periodically so estimated minutes advance on screen.
     setInterval(() => {
-        if (scoresLive) return; // real minutes come from the football-data poll
-        let changed = false;
-        for (const m of MATCHES) {
-            if (m.status === 'live' && m.liveMinute < 90) {
-                // tick once every 10s of real time = 1 minute of match time
-                m.liveMinute++;
-                changed = true;
-            }
-        }
-        if (changed && $('#live').classList.contains('active-section')) {
+        if (MATCHES.some(m => m.status === 'live') && $('#live').classList.contains('active-section')) {
             renderLiveSection();
         }
-    }, 10000);
+    }, 20000);
 }
 
 // ===== LIVE DATA SOURCE: openfootball (with bundled fallback) =====
@@ -680,7 +686,6 @@ const FD_STATUS = {
     FINISHED: 'finished', AWARDED: 'finished',
     // SCHEDULED / TIMED / POSTPONED / SUSPENDED / CANCELLED → stay 'upcoming'
 };
-let scoresLive = false;   // true while at least one match is genuinely in-play
 let scoresOn = false;     // true once the proxy returns a usable response
 
 const pairKey = (a, b) => [a, b].sort().join('~');
@@ -701,7 +706,7 @@ function mergeScores(payload) {
     const byPair = new Map();
     for (const m of MATCHES) byPair.set(pairKey(m.home, m.away), m);
 
-    let applied = 0, anyLive = false;
+    let applied = 0;
     for (const s of payload.matches) {
         const hc = resolveCode(s.home, s.homeName);
         const ac = resolveCode(s.away, s.awayName);
@@ -721,10 +726,9 @@ function mergeScores(payload) {
         m.homeScore = hs; m.awayScore = as;
         m.status = mapped;
         m.fromApi = true;
-        if (mapped === 'live') { m.liveMinute = s.minute ?? m.liveMinute ?? null; anyLive = true; }
+        if (mapped === 'live') m.apiMinute = s.minute ?? null;
         applied++;
     }
-    scoresLive = anyLive;
     return applied > 0;
 }
 
