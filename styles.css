@@ -272,7 +272,7 @@ main { min-height: calc(100vh - 250px); padding: 2rem 0 4rem; }
 .mc-flag { line-height: 1; flex-shrink: 0; display: inline-flex; }
 .mc-name { font-weight: 600; font-size: .95rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-/* Flag images (from flagcdn.com) */
+/* Flag images (self-hosted in /flags) */
 img.flag-img {
     display: inline-block;
     width: auto;

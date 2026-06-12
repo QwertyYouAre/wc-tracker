@@ -30,7 +30,7 @@ function teamFlag(team) {
     if (!team || team.placeholder) return '<span class="flag-img placeholder" aria-hidden="true"></span>';
     const iso = FIFA_TO_ISO[team.code];
     if (!iso) return `<span class="flag-img placeholder" aria-hidden="true">${team.code}</span>`;
-    return `<img class="flag-img" src="https://flagcdn.com/h60/${iso}.png" srcset="https://flagcdn.com/h120/${iso}.png 2x" alt="${team.code}" loading="lazy" decoding="async">`;
+    return `<img class="flag-img" src="flags/${iso}.png" alt="${team.code}" loading="lazy" decoding="async">`;
 }
 
 // ===== DATE / TIME HELPERS =====
