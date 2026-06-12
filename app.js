@@ -548,6 +548,7 @@ function setSection(name) {
 // ===== LIVE MINUTE TICKER =====
 function startLiveTicker() {
     setInterval(() => {
+        if (scoresLive) return; // real minutes come from the football-data poll
         let changed = false;
         for (const m of MATCHES) {
             if (m.status === 'live' && m.liveMinute < 90) {
@@ -667,6 +668,76 @@ function setDataset(data) {
     LOCAL_TODAY = NOW_INSTANT.toLocaleDateString('en-CA');
 }
 
+// ===== LIVE SCORES (football-data.org via /api/scores serverless proxy) =====
+// Additive layer over the openfootball schedule: merges scores/status onto the
+// existing fixtures. If the proxy isn't configured (no token) or errors, this
+// is a silent no-op and the schedule stands.
+const FD_STATUS = {
+    IN_PLAY: 'live', PAUSED: 'live',
+    FINISHED: 'finished', AWARDED: 'finished',
+    // SCHEDULED / TIMED / POSTPONED / SUSPENDED / CANCELLED → stay 'upcoming'
+};
+let scoresLive = false;   // true while at least one match is genuinely in-play
+let scoresOn = false;     // true once the proxy returns a usable response
+
+const pairKey = (a, b) => [a, b].sort().join('~');
+
+// football-data team (tla + name) → app team code.
+function resolveCode(tla, name) {
+    if (tla && TEAM[tla]) return tla;
+    if (name) {
+        const n = normName(name);
+        const t = TEAMS.find((x) => normName(x.name) === n);
+        if (t) return t.code;
+    }
+    return null;
+}
+
+function mergeScores(payload) {
+    if (!payload || !payload.ok || !Array.isArray(payload.matches)) return false;
+    const byPair = new Map();
+    for (const m of MATCHES) byPair.set(pairKey(m.home, m.away), m);
+
+    let applied = 0, anyLive = false;
+    for (const s of payload.matches) {
+        const hc = resolveCode(s.home, s.homeName);
+        const ac = resolveCode(s.away, s.awayName);
+        if (!hc || !ac) continue;
+        const m = byPair.get(pairKey(hc, ac));
+        if (!m) continue;
+        const mapped = FD_STATUS[s.status];
+        if (!mapped) continue; // still scheduled
+
+        // Orient the upstream scores to the app's home/away ordering.
+        let hs = s.homeScore, as = s.awayScore;
+        if (m.home !== hc) { const t = hs; hs = as; as = t; }
+        if (hs == null || as == null) {
+            if (mapped === 'finished') continue; // finished but no score → skip
+            hs = hs ?? 0; as = as ?? 0;
+        }
+        m.homeScore = hs; m.awayScore = as;
+        m.status = mapped;
+        m.fromApi = true;
+        if (mapped === 'live') { m.liveMinute = s.minute ?? m.liveMinute ?? 0; anyLive = true; }
+        applied++;
+    }
+    scoresLive = anyLive;
+    return applied > 0;
+}
+
+async function refreshScores() {
+    let payload = null;
+    try {
+        const r = await fetch('/api/scores', { cache: 'no-store' });
+        if (r.ok) payload = await r.json();
+    } catch (e) { /* offline / no proxy — keep schedule */ }
+    if (!payload || !payload.ok) return;
+    scoresOn = true;
+    const changed = mergeScores(payload);
+    setFooterNote(true, true);
+    if (changed) renderAll();
+}
+
 // ===== SKELETON LOADING =====
 function skeletonCard() {
     return `<div class="match-card sk-card" aria-hidden="true">
@@ -690,12 +761,14 @@ function showSkeletons() {
     $('#groupsGrid').innerHTML = grp.repeat(4);
 }
 
-function setFooterNote(live) {
+function setFooterNote(live, withScores) {
     const el = $('#footerNote');
     if (!el) return;
-    el.innerHTML = live
-        ? 'Live schedule via <a href="https://github.com/openfootball/worldcup.json" target="_blank" rel="noopener">openfootball</a> · public-domain World Cup 2026 data.'
-        : 'Live source unavailable — showing bundled sample data.';
+    if (!live) { el.textContent = 'Live source unavailable — showing bundled sample data.'; return; }
+    const schedule = 'Live schedule via <a href="https://github.com/openfootball/worldcup.json" target="_blank" rel="noopener">openfootball</a>';
+    el.innerHTML = withScores
+        ? `${schedule} · live scores via <a href="https://www.football-data.org" target="_blank" rel="noopener">football-data.org</a>.`
+        : `${schedule} · public-domain World Cup 2026 data.`;
 }
 
 let tickerStarted = false;
@@ -745,7 +818,14 @@ async function boot() {
     }
     setDataset(data);
     renderAll();
-    setFooterNote(live);
+    setFooterNote(live, false);
+
+    // Layer live scores from football-data.org (via the serverless proxy) over the
+    // openfootball schedule, then keep them fresh. No-op if the proxy isn't configured.
+    if (live) {
+        refreshScores();
+        setInterval(refreshScores, 60000);
+    }
 }
 
 document.addEventListener('DOMContentLoaded', boot);
