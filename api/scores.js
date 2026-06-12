@@ -29,6 +29,7 @@ module.exports = async (req, res) => {
 
         const data = await upstream.json();
         const matches = (data.matches || []).map((m) => ({
+            id: m.id, // football-data match id (for the /api/match detail lookup)
             utcDate: m.utcDate,
             status: m.status, // SCHEDULED | TIMED | IN_PLAY | PAUSED | FINISHED | ...
             minute: m.minute ?? null,
