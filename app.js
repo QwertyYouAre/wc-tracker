@@ -170,6 +170,9 @@ function computeScorers() {
         .sort((a, b) => b.goals - a.goals || a.player.localeCompare(b.player));
 }
 
+// "LIVE · 63'" when the minute is known, otherwise just "LIVE".
+const liveLabel = (m) => (m.liveMinute ? `LIVE · ${m.liveMinute}'` : 'LIVE');
+
 // ===== MATCH CARD =====
 function matchCard(m) {
     const home = TEAM[m.home], away = TEAM[m.away];
@@ -179,7 +182,7 @@ function matchCard(m) {
     let scoreHtml, statusHtml;
     if (m.status === 'live') {
         scoreHtml = `<div class="mc-score">${m.homeScore} – ${m.awayScore}</div>`;
-        statusHtml = `<span class="live-tag"><span class="live-dot"></span>LIVE · ${m.liveMinute}'</span>`;
+        statusHtml = `<span class="live-tag"><span class="live-dot"></span>${liveLabel(m)}</span>`;
     } else if (m.status === 'finished') {
         scoreHtml = `<div class="mc-score">${m.homeScore} – ${m.awayScore}</div>`;
         statusHtml = `<span>FT · ${fmtLocalDate(m)}</span>`;
@@ -429,7 +432,7 @@ function openMatchModal(matchId) {
     const home = TEAM[m.home], away = TEAM[m.away];
 
     let statusLine;
-    if (m.status === 'live') statusLine = `<span class="live-tag"><span class="live-dot"></span>LIVE · ${m.liveMinute}'</span>`;
+    if (m.status === 'live') statusLine = `<span class="live-tag"><span class="live-dot"></span>${liveLabel(m)}</span>`;
     else if (m.status === 'finished') statusLine = `Full Time · ${fmtLocalDateTime(m)}`;
     else statusLine = `Kick off ${fmtLocalDateTime(m)}`;
 
@@ -718,7 +721,7 @@ function mergeScores(payload) {
         m.homeScore = hs; m.awayScore = as;
         m.status = mapped;
         m.fromApi = true;
-        if (mapped === 'live') { m.liveMinute = s.minute ?? m.liveMinute ?? 0; anyLive = true; }
+        if (mapped === 'live') { m.liveMinute = s.minute ?? m.liveMinute ?? null; anyLive = true; }
         applied++;
     }
     scoresLive = anyLive;
