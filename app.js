@@ -151,22 +151,34 @@ function bestThirds() {
 }
 
 // ===== TOP SCORERS =====
+// Tournament-wide goals from ESPN (player + team code), set by refreshESPN.
+// Null until ESPN loads; then it's the source of truth for top scorers.
+let ESPN_GOALS = null;
+
 function computeScorers() {
     const goals = new Map(); // key: player|teamCode -> count
-    for (const m of MATCHES) {
-        if (!m.events) continue;
-        for (const ev of m.events) {
-            if (ev.type !== 'goal') continue;
-            const teamCode = ev.side === 'home' ? m.home : m.away;
-            const key = `${ev.player}|${teamCode}`;
+    if (ESPN_GOALS) {
+        for (const g of ESPN_GOALS) {
+            const key = `${g.player}|${g.code}`;
             goals.set(key, (goals.get(key) || 0) + 1);
+        }
+    } else {
+        for (const m of MATCHES) {
+            if (!m.events) continue;
+            for (const ev of m.events) {
+                if (ev.type !== 'goal') continue;
+                const teamCode = ev.side === 'home' ? m.home : m.away;
+                const key = `${ev.player}|${teamCode}`;
+                goals.set(key, (goals.get(key) || 0) + 1);
+            }
         }
     }
     return [...goals.entries()]
         .map(([k, count]) => {
-            const [player, teamCode] = k.split('|');
-            return { player, team: TEAM[teamCode], goals: count };
+            const sep = k.lastIndexOf('|');
+            return { player: k.slice(0, sep), team: TEAM[k.slice(sep + 1)], goals: count };
         })
+        .filter(s => s.team)
         .sort((a, b) => b.goals - a.goals || a.player.localeCompare(b.player));
 }
 
@@ -791,11 +803,23 @@ async function refreshESPN() {
     const byPair = new Map();
     for (const m of MATCHES) byPair.set(pairKey(m.home, m.away), m);
     let applied = 0;
+    const goalLog = []; // tournament-wide goals for the top-scorers list
     for (const ev of (data.events || [])) {
         const comp = ev.competitions && ev.competitions[0];
         const cs = (comp && comp.competitors) || [];
         if (cs.length < 2) continue;
         const ab0 = cs[0].team.abbreviation, ab1 = cs[1].team.abbreviation;
+
+        // Collect goal scorers from this match's details (excludes own goals).
+        const idToCode = { [cs[0].id]: ab0, [cs[1].id]: ab1 };
+        for (const det of (comp.details || [])) {
+            const tyt = (det.type && det.type.text) || '';
+            if (!/goal/i.test(tyt) || /own goal/i.test(tyt)) continue;
+            const code = idToCode[det.team && det.team.id];
+            const ath = det.athletesInvolved && det.athletesInvolved[0] && det.athletesInvolved[0].displayName;
+            if (code && ath) goalLog.push({ player: ath, code });
+        }
+
         const m = byPair.get(pairKey(ab0, ab1));
         if (!m) continue;
         const st = ESPN_STATE[ev.status.type.state];
@@ -813,8 +837,9 @@ async function refreshESPN() {
         }
         applied++;
     }
+    ESPN_GOALS = goalLog;
     setFooterNote(true, 'espn');
-    if (applied) renderAll();
+    if (applied || goalLog.length) renderAll();
     return true;
 }
 
