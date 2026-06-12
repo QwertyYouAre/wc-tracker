@@ -698,8 +698,7 @@ footer {
 
 footer code { background: rgba(255,255,255,.1); color: var(--wc-gold); }
 
-.stats-head { text-transform: uppercase; font-size: .8rem; letter-spacing: 1px; color: var(--text-muted); margin-bottom: .75rem; display: flex; gap: .5rem; align-items: baseline; flex-wrap: wrap; }
-.illus-note { font-size: .68rem; color: var(--wc-gold); opacity: .9; font-style: italic; text-transform: none; letter-spacing: 0; }
+.stats-head { text-transform: uppercase; font-size: .8rem; letter-spacing: 1px; color: var(--text-muted); margin-bottom: .75rem; }
 
 /* SKELETON LOADING */
 :root { --sk-base: #e7e8ef; --sk-hi: #f3f4f8; }
