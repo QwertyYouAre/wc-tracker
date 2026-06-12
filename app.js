@@ -439,6 +439,75 @@ function toggleFavorite(code) {
     renderGroups();
 }
 
+// ===== ILLUSTRATIVE PASSING ANIMATION =====
+// No free API provides ball-tracking/pass coordinates, so this is a SYNTHETIC
+// visualization (clearly labelled). Deterministic per match id so it's stable.
+const PITCH_HOME = [[25,100],[60,40],[60,80],[60,120],[60,160],[130,60],[130,100],[130,140],[210,52],[210,100],[210,148]];
+const PITCH_AWAY = [[295,100],[260,40],[260,80],[260,120],[260,160],[190,60],[190,100],[190,140],[110,52],[110,100],[110,148]];
+let pitchTimer = null;
+
+function pitchHtml(m) {
+    if (m.status !== 'live' && m.status !== 'finished') return '';
+    const dot = (p, cls) => `<circle cx="${p[0]}" cy="${p[1]}" r="4.5" class="${cls}"/>`;
+    const home = PITCH_HOME.map((p) => dot(p, 'pp-home')).join('');
+    const away = PITCH_AWAY.map((p) => dot(p, 'pp-away')).join('');
+    return `
+    <div class="pitch-wrap">
+        <div class="pitch-head"><span>Passing map</span><span class="pitch-note">⚠ Illustrative — not real tracking data</span></div>
+        <svg id="pitchSvg" viewBox="0 0 320 200" class="pitch-svg" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+            <rect x="0" y="0" width="320" height="200" class="pp-grass"/>
+            <rect x="6" y="6" width="308" height="188" fill="none" class="pp-line"/>
+            <line x1="160" y1="6" x2="160" y2="194" class="pp-line"/>
+            <circle cx="160" cy="100" r="22" fill="none" class="pp-line"/>
+            <rect x="6" y="55" width="40" height="90" fill="none" class="pp-line"/>
+            <rect x="274" y="55" width="40" height="90" fill="none" class="pp-line"/>
+            <line id="pitchPass" class="pp-pass" x1="0" y1="0" x2="0" y2="0"/>
+            ${home}${away}
+            <g id="pitchRing"><circle r="9" class="pp-ring"/></g>
+            <g id="pitchBall"><circle r="5" class="pp-ball"/></g>
+        </svg>
+        <div class="pitch-legend"><span class="pp-key pp-home"></span>${TEAM[m.home].name}<span class="pp-key pp-away"></span>${TEAM[m.away].name}</div>
+    </div>`;
+}
+
+function stopPitch() { if (pitchTimer) { clearInterval(pitchTimer); pitchTimer = null; } }
+
+function startPitch(seedStr) {
+    stopPitch();
+    const ball = document.getElementById('pitchBall');
+    const ring = document.getElementById('pitchRing');
+    const line = document.getElementById('pitchPass');
+    if (!ball) return;
+    const pts = PITCH_HOME.concat(PITCH_AWAY);
+    let seed = 0;
+    for (const ch of String(seedStr)) seed = (seed * 31 + ch.charCodeAt(0)) >>> 0;
+    const rnd = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+    let team = 0, cur = 0;
+    const place = (i) => {
+        const [x, y] = pts[i];
+        ball.setAttribute('transform', `translate(${x},${y})`);
+        ring.setAttribute('transform', `translate(${x},${y})`);
+    };
+    place(0);
+    const step = () => {
+        if (rnd() < 0.18) team ^= 1;             // occasional turnover
+        const base = team ? 11 : 0;
+        let next = base + Math.floor(rnd() * 11);
+        if (next === cur) next = base + ((next - base + 1) % 11);
+        const [px, py] = pts[cur], [nx, ny] = pts[next];
+        if (line) {
+            line.setAttribute('x1', px); line.setAttribute('y1', py);
+            line.setAttribute('x2', nx); line.setAttribute('y2', ny);
+            line.style.opacity = '0.85';
+            setTimeout(() => { if (line) line.style.opacity = '0.12'; }, 650);
+        }
+        place(next);
+        cur = next;
+    };
+    step();
+    pitchTimer = setInterval(step, 1300);
+}
+
 // ===== MATCH MODAL =====
 function openMatchModal(matchId) {
     const m = MATCHES.find(x => x.id === matchId);
@@ -462,7 +531,11 @@ function openMatchModal(matchId) {
         ${statRow('Shots on Target', stats.onTarget[0], stats.onTarget[1])}
         ${statRow('Corners', stats.corners[0], stats.corners[1])}
         ${statRow('Fouls', stats.fouls[0], stats.fouls[1])}
-    ` : '<p class="muted" style="text-align:center;padding:1rem 0;">Stats available once the match starts.</p>';
+    ` : `<p class="muted" style="text-align:center;padding:1rem 0;">${
+        (m.status === 'live' || m.status === 'finished')
+            ? "Detailed stats aren't available from the current data source."
+            : 'Stats available once the match starts.'
+    }</p>`;
 
     const eventsHtml = (m.events && m.events.length) ? `
         <div class="timeline">
@@ -506,10 +579,12 @@ function openMatchModal(matchId) {
         <div class="modal-body">
             ${statsHtml}
             ${eventsHtml}
+            ${pitchHtml(m)}
         </div>
     `;
     $('#modalBackdrop').classList.add('open');
     $('#modalBackdrop').setAttribute('aria-hidden', 'false');
+    startPitch(m.id);
 }
 
 function statRow(label, l, r) {
@@ -529,6 +604,7 @@ function statRow(label, l, r) {
 }
 
 function closeModal() {
+    stopPitch();
     $('#modalBackdrop').classList.remove('open');
     $('#modalBackdrop').setAttribute('aria-hidden', 'true');
 }
