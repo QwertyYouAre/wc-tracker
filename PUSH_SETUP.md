@@ -70,7 +70,8 @@ functions. No build/output settings change — the static files still serve as-i
 - In-tab and push alerts share the same notification `tag` (the ESPN event id),
   so an open tab won't double-notify — the OS coalesces them.
 - Dead subscriptions (HTTP 404/410) are auto-pruned on send.
-- The app shell is cached by the service worker (`sw.js`); **live score data is
-  never cached** (ESPN/`/api` bypass the cache). After a deploy, returning users
-  pick up new app code on their second load (stale-while-revalidate). To force an
-  instant update for everyone, bump `CACHE` (`wc-tracker-v1` → `v2`) in `sw.js`.
+- The service worker (`sw.js`) serves the **app shell** (HTML/JS/CSS) network-first
+  so a deploy reaches online visitors immediately, falling back to cache only when
+  offline; flags/icons are cache-first. **Live score data is never cached** (ESPN
+  and `/api/*` bypass the worker entirely). Bump `CACHE` in `sw.js` when you want to
+  invalidate cached static assets.

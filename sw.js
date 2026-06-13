@@ -12,7 +12,7 @@
 // (Web Push) would additionally need VAPID keys and a push backend — not wired
 // up yet; in-page notifications continue to come from app.js while a tab is open.
 
-const CACHE = 'wc-tracker-v1';
+const CACHE = 'wc-tracker-v2';
 const SHELL = [
     './',
     'index.html',
@@ -76,6 +76,16 @@ self.addEventListener('notificationclick', (event) => {
     })());
 });
 
+// Save a fresh same-origin response into the cache (clone first — bodies are
+// single-use).
+function cachePut(req, res) {
+    if (res && res.ok && res.type === 'basic') {
+        const copy = res.clone();
+        caches.open(CACHE).then((c) => c.put(req, copy));
+    }
+    return res;
+}
+
 self.addEventListener('fetch', (event) => {
     const req = event.request;
     if (req.method !== 'GET') return;
@@ -86,23 +96,38 @@ self.addEventListener('fetch', (event) => {
     if (url.origin !== self.location.origin) return;
     if (url.pathname.startsWith('/api/')) return;
 
-    event.respondWith(
-        caches.match(req).then((cached) => {
-            const network = fetch(req).then((res) => {
-                // Cache a fresh copy of successful, basic (same-origin) responses.
-                if (res && res.ok && res.type === 'basic') {
-                    const copy = res.clone();
-                    caches.open(CACHE).then((c) => c.put(req, copy));
-                }
-                return res;
-            }).catch(() => null);
-
-            // Cache-first; fall back to network; for failed navigations, the shell.
-            return cached || network.then((res) => {
-                if (res) return res;
+    // The app shell (markup, code, styles, manifest) is NETWORK-FIRST: an online
+    // visitor always gets the freshly deployed version, so a code fix is never
+    // hidden behind a stale cache. Falls back to cache only when offline.
+    const isShell = req.mode === 'navigate' || /\.(?:html|js|css|webmanifest)$/i.test(url.pathname);
+    if (isShell) {
+        event.respondWith((async () => {
+            try {
+                // `cache: 'reload'` bypasses the browser HTTP cache so we get the
+                // truly-deployed shell, not a heuristically-cached older copy.
+                return cachePut(req, await fetch(req, { cache: 'reload' }));
+            } catch (e) {
+                const cached = await caches.match(req);
+                if (cached) return cached;
                 if (req.mode === 'navigate') return caches.match('index.html');
                 return new Response('', { status: 504, statusText: 'Offline' });
-            });
-        })
-    );
+            }
+        })());
+        return;
+    }
+
+    // Everything else (flags, icons) is CACHE-FIRST: rarely changes, so serve it
+    // instantly and refresh the copy in the background.
+    event.respondWith((async () => {
+        const cached = await caches.match(req);
+        if (cached) {
+            fetch(req).then((res) => cachePut(req, res)).catch(() => {});
+            return cached;
+        }
+        try {
+            return cachePut(req, await fetch(req));
+        } catch (e) {
+            return new Response('', { status: 504, statusText: 'Offline' });
+        }
+    })());
 });
