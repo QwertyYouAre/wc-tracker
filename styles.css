@@ -397,6 +397,20 @@ img.flag-img.logo-flag   { height: 12px; margin: 0 .1rem; }
 .modal-bars:not(:empty) { margin-bottom: 1.1rem; }
 .bars-note { font-size: .68rem; margin: .45rem 0 0; line-height: 1.35; }
 
+/* Live stats strip on a match card (possession bar + shots) */
+.mc-stats { margin-top: .7rem; }
+.mcs-cap { font-size: .62rem; font-weight: 700; text-transform: uppercase; letter-spacing: .4px; color: var(--text-muted); margin-bottom: .35rem; }
+.mcs-poss { display: flex; align-items: center; gap: .5rem; font-size: .74rem; font-weight: 700; }
+.mcs-poss .mcs-val { min-width: 2.6em; }
+.mcs-poss .mcs-val:last-child { text-align: right; }
+.mcs-poss .mcs-bar { flex: 1; height: 6px; border-radius: 999px; overflow: hidden; background: var(--odds-away); }
+.mcs-poss .mcs-bar span { display: block; height: 100%; background: var(--odds-home); }
+.mcs-poss-lbl { text-align: center; font-size: .6rem; text-transform: uppercase; letter-spacing: .4px; color: var(--text-muted); margin: .15rem 0 .4rem; }
+.mcs-grid { display: grid; grid-template-columns: auto 1fr auto; gap: .2rem .5rem; font-size: .74rem; align-items: center; }
+.mcs-grid .mcs-h { font-weight: 700; text-align: left; }
+.mcs-grid .mcs-a { font-weight: 700; text-align: right; }
+.mcs-grid .mcs-mid { text-align: center; color: var(--text-muted); font-weight: 500; font-size: .68rem; }
+
 /* GROUPS */
 .groups-grid {
     display: grid;

@@ -339,6 +339,32 @@ function winBars(m) {
     return liveHtml + preHtml;
 }
 
+// Compact live-stats strip (possession bar + shots) for an in-play card. Data
+// comes straight off the scoreboard via refreshESPN — no extra request.
+function liveStatsHtml(m) {
+    if (m.status !== 'live' || !m.liveStats) return '';
+    const s = m.liveStats;
+    const hasPoss = s.poss[0] != null && s.poss[1] != null;
+    const hasShots = s.shots[0] != null && s.shots[1] != null;
+    if (!hasPoss && !hasShots) return '';
+    const possHtml = hasPoss ? `
+        <div class="mcs-poss">
+            <span class="mcs-val">${Math.round(s.poss[0])}%</span>
+            <div class="mcs-bar"><span style="width:${s.poss[0]}%"></span></div>
+            <span class="mcs-val">${Math.round(s.poss[1])}%</span>
+        </div>
+        <div class="mcs-poss-lbl">Possession</div>` : '';
+    const sotRow = s.onTarget[0] != null
+        ? `<span class="mcs-h">${s.onTarget[0]}</span><span class="mcs-mid">On target</span><span class="mcs-a">${s.onTarget[1]}</span>`
+        : '';
+    const shotsHtml = hasShots ? `
+        <div class="mcs-grid">
+            <span class="mcs-h">${s.shots[0]}</span><span class="mcs-mid">Shots</span><span class="mcs-a">${s.shots[1]}</span>
+            ${sotRow}
+        </div>` : '';
+    return `<div class="mc-stats"><div class="mcs-cap">📊 Live stats</div>${possHtml}${shotsHtml}</div>`;
+}
+
 // ===== MATCH CARD =====
 function matchCard(m) {
     const home = TEAM[m.home], away = TEAM[m.away];
@@ -383,6 +409,7 @@ function matchCard(m) {
                 <span class="mc-venue">📍 ${esc(m.venue)}</span>
                 ${countdownHtml}
             </div>
+            ${liveStatsHtml(m)}
             ${winBars(m)}
         </div>
     `;
@@ -1402,6 +1429,23 @@ async function refreshESPN() {
             const dc = ev.status.displayClock || t.detail || '';
             const mm = String(dc).match(/(\d+)/);
             m.apiMinute = mm ? parseInt(mm[1], 10) : null;
+
+            // Slim live team stats straight off the scoreboard (no extra fetch),
+            // oriented to the app's home/away, for a stats strip on the card.
+            const statOf = (c, name) => {
+                const s = (c.statistics || []).find(x => x.name === name);
+                const v = s ? parseFloat(s.displayValue) : NaN;
+                return isNaN(v) ? null : v;
+            };
+            const byCode = { [ab0]: cs[0], [ab1]: cs[1] };
+            const hc = byCode[m.home], ac = byCode[m.away];
+            if (hc && ac && (statOf(hc, 'possessionPct') != null || statOf(hc, 'totalShots') != null)) {
+                m.liveStats = {
+                    poss: [statOf(hc, 'possessionPct'), statOf(ac, 'possessionPct')],
+                    shots: [statOf(hc, 'totalShots'), statOf(ac, 'totalShots')],
+                    onTarget: [statOf(hc, 'shotsOnTarget'), statOf(ac, 'shotsOnTarget')],
+                };
+            }
         }
         applied++;
     }
