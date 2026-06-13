@@ -1,0 +1,20 @@
+{
+  "name": "WC Tracker — FIFA World Cup 2026",
+  "short_name": "WC Tracker",
+  "description": "Live FIFA World Cup 2026 tracker — group standings, knockout bracket, top scorers, and the full schedule in your local time.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#1a1d27",
+  "theme_color": "#4f1d8c",
+  "categories": ["sports", "news"],
+  "icons": [
+    {
+      "src": "icon.svg",
+      "type": "image/svg+xml",
+      "sizes": "any",
+      "purpose": "any maskable"
+    }
+  ]
+}

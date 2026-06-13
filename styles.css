@@ -249,6 +249,16 @@ main { min-height: calc(100vh - 250px); padding: 2rem 0 4rem; }
 .match-card.live { border-color: var(--wc-red); border-width: 2px; }
 .match-card.favorite { box-shadow: 0 0 0 2px var(--wc-gold), var(--shadow-sm); }
 
+/* Keyboard focus ring — match cards, fav tiles and chips are reachable by Tab
+   and openable with Enter/Space, so make the focused one clearly visible. */
+.match-card:focus-visible,
+.fav-tile:focus-visible,
+.filter-chip:focus-visible,
+.ft-view:focus-visible {
+    outline: 3px solid var(--wc-gold);
+    outline-offset: 2px;
+}
+
 .mc-top {
     display: flex;
     justify-content: space-between;
@@ -530,6 +540,8 @@ img.flag-img.logo-flag   { height: 12px; margin: 0 .1rem; }
 }
 
 .bracket-slot .br-team.placeholder { color: var(--text-muted); font-style: italic; }
+.bracket-slot .br-team.br-win { font-weight: 700; color: var(--wc-purple); }
+.bracket-slot .br-team.br-win::after { content: " ✓"; color: var(--wc-green); }
 .bracket-slot .br-team .br-flag { font-size: 1.1rem; }
 .bracket-slot .br-divider { border-top: 1px dashed var(--border); margin: .15rem 0; }
 

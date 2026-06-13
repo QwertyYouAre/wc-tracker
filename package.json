@@ -1,0 +1,10 @@
+{
+  "name": "wc-tracker",
+  "version": "1.0.0",
+  "private": true,
+  "description": "FIFA World Cup 2026 tracker — static site with serverless live-score proxy and Web Push.",
+  "license": "MIT",
+  "dependencies": {
+    "web-push": "^3.6.7"
+  }
+}

@@ -10,6 +10,12 @@ const STATE = {
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 
+// Escape any string we drop into innerHTML. Team/player/assist/venue text comes
+// from third-party feeds (ESPN, openfootball); a stray < or & would otherwise
+// break a card or, in the worst case, inject markup.
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
 // ===== FLAGS =====
 // FIFA 3-letter code → ISO 3166-1 alpha-2 (with gb-eng / gb-sct for home nations)
 const FIFA_TO_ISO = {
@@ -247,8 +253,9 @@ function matchCard(m) {
         ? `<span class="mc-countdown">${relativeUntil(m)}</span>`
         : '';
 
+    const aria = `${TEAM[m.home].name} versus ${TEAM[m.away].name}, Group ${m.group}. Open match details.`;
     return `
-        <div class="${cls}" data-match="${m.id}">
+        <div class="${cls}" data-match="${m.id}" role="button" tabindex="0" aria-label="${esc(aria)}">
             <div class="mc-top">
                 <span><span class="mc-group-tag">${m.group}</span> Group ${m.group}</span>
                 ${statusHtml}
@@ -256,16 +263,16 @@ function matchCard(m) {
             <div class="mc-teams">
                 <div class="mc-team">
                     <span class="mc-flag">${teamFlag(home)}</span>
-                    <span class="mc-name">${home.name}</span>
+                    <span class="mc-name">${esc(home.name)}</span>
                 </div>
                 ${scoreHtml}
                 <div class="mc-team away">
                     <span class="mc-flag">${teamFlag(away)}</span>
-                    <span class="mc-name">${away.name}</span>
+                    <span class="mc-name">${esc(away.name)}</span>
                 </div>
             </div>
             <div class="mc-bottom">
-                <span class="mc-venue">📍 ${m.venue}</span>
+                <span class="mc-venue">📍 ${esc(m.venue)}</span>
                 ${countdownHtml}
             </div>
             ${oddsBar(m)}
@@ -407,11 +414,32 @@ function ordinal(n) {
     return n + (s[(v - 20) % 10] || s[v] || s[0]);
 }
 
-function bracketSlotHtml(teamA, teamB, label, finalCls = '') {
-    const renderTeam = (t) => t.placeholder
-        ? `<div class="br-team placeholder"><span class="br-flag">${teamFlag(t)}</span>${t.name}</div>`
-        : `<div class="br-team"><span class="br-flag">${teamFlag(t)}</span>${t.name}</div>`;
-    return `<div class="bracket-slot ${finalCls}">
+// Real knockout results harvested from ESPN (pairKey of the two FIFA codes →
+// winning code). Filled by refreshESPN() as games finish; lets the bracket
+// propagate actual winners through every round instead of static placeholders.
+const KNOCKOUT = {};
+const brPlaceholder = (txt) => ({ name: txt, flag: '🏳️', placeholder: true });
+
+// The winner of a tie, if both sides are real teams and ESPN has a result.
+function knockoutWinner(a, b) {
+    if (!a || !b || a.placeholder || b.placeholder) return null;
+    const code = KNOCKOUT[pairKey(a.code, b.code)];
+    return code ? TEAM[code] : null;
+}
+// The losing side of a decided tie (for the 3rd-place playoff).
+function loserOf(slot) {
+    if (!slot.winner || slot.a.placeholder || slot.b.placeholder) return null;
+    return slot.winner.code === slot.a.code ? slot.b : slot.a;
+}
+
+function bracketSlotHtml(teamA, teamB, label, opts = {}) {
+    const winCode = opts.winner && opts.winner.code;
+    const renderTeam = (t) => {
+        const isWin = winCode && !t.placeholder && t.code === winCode;
+        const cls = `br-team${t.placeholder ? ' placeholder' : ''}${isWin ? ' br-win' : ''}`;
+        return `<div class="${cls}"><span class="br-flag">${teamFlag(t)}</span>${esc(t.name)}</div>`;
+    };
+    return `<div class="bracket-slot ${opts.finalCls || ''}">
         ${label ? `<div class="muted" style="font-size:.65rem;letter-spacing:.5px;text-transform:uppercase;">${label}</div>` : ''}
         ${renderTeam(teamA)}
         <div class="br-divider"></div>
@@ -419,29 +447,49 @@ function bracketSlotHtml(teamA, teamB, label, finalCls = '') {
     </div>`;
 }
 
+// Advance one round: each new slot is fed by two slots from the previous round.
+// A feeding slot contributes its real winner if known, else a "Winner Mx"
+// placeholder — so the tree stays coherent even before results exist.
+function advanceRound(prev, prefix) {
+    const slots = [];
+    for (let i = 0; i < prev.length; i += 2) {
+        const a = prev[i].winner || brPlaceholder(`Winner ${prev[i].tag}`);
+        const b = prev[i + 1].winner || brPlaceholder(`Winner ${prev[i + 1].tag}`);
+        slots.push({ a, b, winner: knockoutWinner(a, b), tag: `${prefix}${i / 2 + 1}` });
+    }
+    return slots;
+}
+
 function renderBracket() {
-    const r32Html = R32_PAIRS.map((pair, i) =>
-        bracketSlotHtml(resolveSlot(pair[0]), resolveSlot(pair[1]), `R32 · M${i + 1}`)
+    // R32 sides come from the settled group standings; winners (and everything
+    // beyond) come from real ESPN knockout results via KNOCKOUT.
+    let r32 = R32_PAIRS.map((pair, i) => {
+        const a = resolveSlot(pair[0]), b = resolveSlot(pair[1]);
+        return { a, b, winner: knockoutWinner(a, b), tag: `M${i + 1}` };
+    });
+    const r16 = advanceRound(r32, 'R16-');
+    const qf = advanceRound(r16, 'QF-');
+    const sf = advanceRound(qf, 'SF-');
+
+    const colHtml = (slots, round) => slots.map((s, i) =>
+        bracketSlotHtml(s.a, s.b, `${round} · M${i + 1}`, { winner: s.winner })
     ).join('');
 
-    const placeholder = (txt) => ({ name: txt, flag: '🏳️', placeholder: true });
-    const r16Html = Array.from({ length: 8 }, (_, i) =>
-        bracketSlotHtml(placeholder(`Winner M${i * 2 + 1}`), placeholder(`Winner M${i * 2 + 2}`), `R16 · M${i + 1}`)
-    ).join('');
-    const qfHtml = Array.from({ length: 4 }, (_, i) =>
-        bracketSlotHtml(placeholder(`Winner R16-${i * 2 + 1}`), placeholder(`Winner R16-${i * 2 + 2}`), `QF · M${i + 1}`)
-    ).join('');
-    const sfHtml = Array.from({ length: 2 }, (_, i) =>
-        bracketSlotHtml(placeholder(`Winner QF-${i * 2 + 1}`), placeholder(`Winner QF-${i * 2 + 2}`), `SF · M${i + 1}`)
-    ).join('');
-    const finalHtml = bracketSlotHtml(placeholder('Winner SF-1'), placeholder('Winner SF-2'), '🏆 FINAL · Jul 19', 'final')
-                    + bracketSlotHtml(placeholder('Loser SF-1'), placeholder('Loser SF-2'), '🥉 3rd Place');
+    // Final: contested by the two SF winners; champion highlighted if decided.
+    const fa = sf[0].winner || brPlaceholder('Winner SF-1');
+    const fb = sf[1].winner || brPlaceholder('Winner SF-2');
+    const champion = knockoutWinner(fa, fb);
+    // 3rd place: the two beaten semi-finalists.
+    const la = loserOf(sf[0]) || brPlaceholder('Loser SF-1');
+    const lb = loserOf(sf[1]) || brPlaceholder('Loser SF-2');
+    const finalHtml = bracketSlotHtml(fa, fb, '🏆 FINAL · Jul 19', { finalCls: 'final', winner: champion })
+                    + bracketSlotHtml(la, lb, '🥉 3rd Place', { winner: knockoutWinner(la, lb) });
 
     $('#bracketGrid').innerHTML = `
-        <div class="round-col"><h4>Round of 32</h4>${r32Html}</div>
-        <div class="round-col"><h4>Round of 16</h4>${r16Html}</div>
-        <div class="round-col"><h4>Quarterfinals</h4>${qfHtml}</div>
-        <div class="round-col"><h4>Semifinals</h4>${sfHtml}</div>
+        <div class="round-col"><h4>Round of 32</h4>${colHtml(r32, 'R32')}</div>
+        <div class="round-col"><h4>Round of 16</h4>${colHtml(r16, 'R16')}</div>
+        <div class="round-col"><h4>Quarterfinals</h4>${colHtml(qf, 'QF')}</div>
+        <div class="round-col"><h4>Semifinals</h4>${colHtml(sf, 'SF')}</div>
         <div class="round-col"><h4>Final</h4>${finalHtml}</div>
     `;
 }
@@ -462,8 +510,8 @@ function renderScorers() {
             return `
             <tr>
                 <td>${rank}</td>
-                <td><strong>${s.player}</strong></td>
-                <td class="team-cell"><span class="mini-flag">${teamFlag(s.team)}</span>${s.team.name}</td>
+                <td><strong>${esc(s.player)}</strong></td>
+                <td class="team-cell"><span class="mini-flag">${teamFlag(s.team)}</span>${esc(s.team.name)}</td>
                 <td class="goals-cell">${s.goals}</td>
             </tr>`;
         }).join('')
@@ -474,13 +522,14 @@ function renderScorers() {
 function renderFavorites() {
     $('#favoritesPicker').innerHTML = TEAMS.map(t => {
         const on = STATE.favorites.has(t.code) ? 'on' : '';
-        return `<div class="fav-tile ${on}" data-fav="${t.code}">
+        const aria = `${on ? 'Remove' : 'Add'} ${t.name} ${on ? 'from' : 'to'} favorites`;
+        return `<div class="fav-tile ${on}" data-fav="${t.code}" role="button" tabindex="0" aria-pressed="${on ? 'true' : 'false'}" aria-label="${esc(aria)}">
             <span class="ft-flag">${teamFlag(t)}</span>
             <div class="ft-info">
-                <div>${t.name}</div>
+                <div>${esc(t.name)}</div>
                 <div class="ft-group">Group ${t.group}</div>
             </div>
-            <button class="ft-view" type="button" data-view="${t.code}">View</button>
+            <button class="ft-view" type="button" data-view="${t.code}" aria-label="${esc('View ' + t.name + ' lineup')}">View</button>
             <span class="fav-star">★</span>
         </div>`;
     }).join('');
@@ -624,11 +673,11 @@ function playerChip(p, x, y) {
     const onPitch = x != null;
     const style = onPitch ? ` style="left:${x.toFixed(1)}%;top:${y}%"` : '';
     const flip = onPitch && y < 30 ? ' tip-below' : ''; // front-line tooltips open downward
-    return `<div class="player-chip${flip}"${style} tabindex="0" aria-label="${p.full}, ${gl}, ${al}">
-        <span class="pc-num">${p.jersey || '·'}</span>
-        <span class="pc-name">${p.name}${inMark}</span>
+    return `<div class="player-chip${flip}"${style} tabindex="0" aria-label="${esc(p.full)}, ${gl}, ${al}">
+        <span class="pc-num">${esc(p.jersey || '·')}</span>
+        <span class="pc-name">${esc(p.name)}${inMark}</span>
         ${badge}
-        <span class="pc-tip">${p.full}<br>⚽ ${gl} · 🅰 ${al}<span class="pc-tip-sub">World Cup 2026</span></span>
+        <span class="pc-tip">${esc(p.full)}<br>⚽ ${gl} · 🅰 ${al}<span class="pc-tip-sub">World Cup 2026</span></span>
     </div>`;
 }
 
@@ -672,11 +721,11 @@ function lineupContentHtml(code, data) {
     if (!data) return '<div class="empty-state">Lineup isn’t available yet for this team.</div>';
     let note;
     if (data.presumed) {
-        note = `Predicted XI · ${data.formation} — ${TEAM[code].name} haven’t kicked off yet, so this is a default shape, not a confirmed lineup.`;
+        note = `Predicted XI · ${esc(data.formation)} — ${esc(TEAM[code].name)} haven’t kicked off yet, so this is a default shape, not a confirmed lineup.`;
     } else {
         const fm = data.fromMatch;
         const opp = fm ? TEAM[fm.home === code ? fm.away : fm.home] : null;
-        note = `Starting XI${data.formation ? ` · ${data.formation}` : ''}${opp ? ` · from ${TEAM[code].name} v ${opp.name}` : ''}`;
+        note = `Starting XI${data.formation ? ` · ${esc(data.formation)}` : ''}${opp ? ` · from ${esc(TEAM[code].name)} v ${esc(opp.name)}` : ''}`;
     }
     const subsLabel = data.presumed ? 'Rest of squad' : 'Substitutes';
     const subsSide = data.subs.length
@@ -691,9 +740,9 @@ function lineupContentHtml(code, data) {
 function subRow(p) {
     const g = WC_GOALS[p.id] || 0, a = (WC_ASSISTS && WC_ASSISTS[p.id]) || 0;
     const inMark = p.subbedIn ? ' <span class="pc-in" title="Came on as a substitute">▲</span>' : '';
-    return `<div class="sub-row" tabindex="0" aria-label="${p.full}, ${g} goals, ${a} assists">
-        <span class="sr-num">${p.jersey || '·'}</span>
-        <span class="sr-name">${p.name}${inMark}</span>
+    return `<div class="sub-row" tabindex="0" aria-label="${esc(p.full)}, ${g} goals, ${a} assists">
+        <span class="sr-num">${esc(p.jersey || '·')}</span>
+        <span class="sr-name">${esc(p.name)}${inMark}</span>
         <span class="sr-ga"><span title="Goals">⚽${g}</span><span title="Assists">🅰${a}</span></span>
     </div>`;
 }
@@ -707,13 +756,14 @@ async function openLineupModal(code) {
         <div class="modal-header lineup-head">
             <div class="lh-flag">${teamFlag(t)}</div>
             <div>
-                <div class="lh-name">${t.name}</div>
+                <div class="lh-name">${esc(t.name)}</div>
                 <div class="lh-group">Group ${t.group} · Lineup</div>
             </div>
         </div>
         <div class="modal-body" id="lineupContent"><div class="empty-state">Loading lineup…</div></div>`;
     $('#modalBackdrop').classList.add('open');
     $('#modalBackdrop').setAttribute('aria-hidden', 'false');
+    onModalOpened();
 
     await loadWcStats();
     const data = await loadLineup(code);
@@ -740,6 +790,7 @@ function toggleFavorite(code) {
     renderLiveSection();
     renderGroups();
     renderFavoritesFeed();
+    syncPushFavorites().catch(() => {}); // keep server-side push targeting current
 }
 
 // ===== "YOUR TEAMS — NEXT UP" FEED =====
@@ -792,18 +843,19 @@ function modalDetailHtml(m) {
             ${evList.slice().sort((a, b) => b.min - a.min).map(ev => {
                 const team = ev.side === 'home' ? home : away;
                 const icon = ev.type === 'goal' ? '⚽' : ev.type === 'og' ? '🥅' : ev.type === 'yellow' ? '🟨' : ev.type === 'red' ? '🟥' : ev.type === 'sub' ? '🔄' : ev.type === 'disallowed' ? '🚫' : ev.type === 'penalty' ? '⚽' : '•';
+                const who = ev.player ? ' · ' + esc(ev.player) : '';
                 const text = ev.type === 'goal'
-                    ? `<strong>GOAL</strong>${ev.player ? ' · ' + ev.player : ''}${ev.assist ? ` <span class="muted">(assist: ${ev.assist})</span>` : ''}`
-                    : ev.type === 'og' ? `<strong>OWN GOAL</strong>${ev.player ? ' · ' + ev.player : ''}`
-                    : ev.type === 'yellow' ? `Yellow card${ev.player ? ' · ' + ev.player : ''}`
-                    : ev.type === 'red' ? `<strong>RED CARD</strong>${ev.player ? ' · ' + ev.player : ''}`
-                    : ev.type === 'sub' ? `Substitution${ev.player ? ' · ' + ev.player : ''}`
-                    : ev.type === 'disallowed' ? `<strong>GOAL DISALLOWED</strong>${ev.reason ? ` <span class="muted">(${ev.reason})</span>` : ''}${ev.player ? ' · ' + ev.player : ''}`
-                    : `${ev.type}${ev.player ? ' · ' + ev.player : ''}`;
+                    ? `<strong>GOAL</strong>${who}${ev.assist ? ` <span class="muted">(assist: ${esc(ev.assist)})</span>` : ''}`
+                    : ev.type === 'og' ? `<strong>OWN GOAL</strong>${who}`
+                    : ev.type === 'yellow' ? `Yellow card${who}`
+                    : ev.type === 'red' ? `<strong>RED CARD</strong>${who}`
+                    : ev.type === 'sub' ? `Substitution${who}`
+                    : ev.type === 'disallowed' ? `<strong>GOAL DISALLOWED</strong>${ev.reason ? ` <span class="muted">(${esc(ev.reason)})</span>` : ''}${who}`
+                    : `${esc(ev.type)}${who}`;
                 return `<div class="tl-event${ev.type === 'disallowed' ? ' tl-void' : ''}">
                     <span class="tl-min">${ev.minLabel || ev.min}'</span>
                     <span class="tl-icon">${icon}</span>
-                    <span class="tl-text">${text}<span class="tl-team-tag">${teamFlag(team)} ${team.name}</span></span>
+                    <span class="tl-text">${text}<span class="tl-team-tag">${teamFlag(team)} ${esc(team.name)}</span></span>
                 </div>`;
             }).join('')}
         </div>` : (m.status === 'upcoming' ? '<p class="muted" style="text-align:center;padding:1rem 0;">Live commentary begins at kick-off.</p>' : '');
@@ -844,17 +896,17 @@ function openMatchModal(matchId) {
         <div class="modal-header">
             <div class="mh-meta">
                 <span><span class="mc-group-tag">${m.group}</span> Group ${m.group}</span>
-                <span>📍 ${m.venue}</span>
+                <span>📍 ${esc(m.venue)}</span>
             </div>
             <div class="mh-teams">
                 <div class="mh-team">
                     <div class="mh-flag">${teamFlag(home)}</div>
-                    <div class="mh-name">${home.name}</div>
+                    <div class="mh-name">${esc(home.name)}</div>
                 </div>
                 <div class="mh-score">${scoreDisplay}</div>
                 <div class="mh-team">
                     <div class="mh-flag">${teamFlag(away)}</div>
-                    <div class="mh-name">${away.name}</div>
+                    <div class="mh-name">${esc(away.name)}</div>
                 </div>
             </div>
             <div class="mh-status">${statusLine}</div>
@@ -863,6 +915,7 @@ function openMatchModal(matchId) {
     `;
     $('#modalBackdrop').classList.add('open');
     $('#modalBackdrop').setAttribute('aria-hidden', 'false');
+    onModalOpened();
     loadEspnDetail(m);
 }
 
@@ -882,10 +935,39 @@ function statRow(label, l, r) {
     </div>`;
 }
 
+// ===== MODAL FOCUS MANAGEMENT (accessibility) =====
+// Keep keyboard focus inside the open dialog and return it to wherever it was
+// when the dialog closes, so keyboard / screen-reader users aren't dropped at
+// the top of the page.
+let lastFocusedEl = null;
+
+function focusTrap(e) {
+    if (e.key !== 'Tab') return;
+    const modal = $('.modal');
+    if (!modal) return;
+    const f = $$('button, [href], input, [tabindex]:not([tabindex="-1"])', modal)
+        .filter(el => !el.disabled && el.offsetParent !== null);
+    if (!f.length) return;
+    const first = f[0], last = f[f.length - 1];
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+}
+
+// Both modal openers call this once the dialog is shown.
+function onModalOpened() {
+    lastFocusedEl = document.activeElement;
+    document.addEventListener('keydown', focusTrap);
+    const close = $('#modalClose');
+    if (close) close.focus();
+}
+
 function closeModal() {
     openMatchId = null;
     $('#modalBackdrop').classList.remove('open');
     $('#modalBackdrop').setAttribute('aria-hidden', 'true');
+    document.removeEventListener('keydown', focusTrap);
+    if (lastFocusedEl && typeof lastFocusedEl.focus === 'function') lastFocusedEl.focus();
+    lastFocusedEl = null;
 }
 
 // ===== THEME =====
@@ -1150,6 +1232,14 @@ async function refreshESPN() {
             if (a0 && a0.id) goalsById[a0.id] = (goalsById[a0.id] || 0) + 1;
         }
 
+        // Record any decided result by team-pair so the knockout bracket can
+        // propagate real winners (group games are harmless here; the bracket
+        // only ever looks up knockout pairings).
+        if (ev.status && ev.status.type && ev.status.type.state === 'post') {
+            const w = cs[0].winner ? ab0 : cs[1].winner ? ab1 : null;
+            if (w) KNOCKOUT[pairKey(ab0, ab1)] = w;
+        }
+
         const m = byPair.get(pairKey(ab0, ab1));
         if (!m) continue;
         m.espnId = ev.id; // keep for win-odds + lazy detail, even while still 'pre'
@@ -1182,7 +1272,7 @@ async function refreshESPN() {
 // American moneylines, convert each to an implied probability, then strip the
 // book's built-in margin (the "vig") by normalising the three to 100% — giving
 // an honest win/draw/win split straight from ESPN's own odds feed.
-const ESPN_CORE = 'https://sports.core.api.espn.com/v2/sports/soccer/leagues/fifa.world';
+// (Reuses ESPN_CORE_BASE, defined above for the leaders feed.)
 
 function americanToProb(ml) {
     const n = typeof ml === 'string' ? parseInt(ml.replace(/[+\s]/g, ''), 10) : ml;
@@ -1220,7 +1310,7 @@ async function loadOddsFor(m) {
     if (!m.espnId || m.oddsLoaded) return false;
     m.oddsLoaded = true; // claim it up-front so concurrent ticks don't double-fetch
     try {
-        const r = await fetch(`${ESPN_CORE}/events/${m.espnId}/competitions/${m.espnId}/odds`);
+        const r = await fetch(`${ESPN_CORE_BASE}/events/${m.espnId}/competitions/${m.espnId}/odds`);
         if (!r.ok) return false;
         const d = await r.json();
         const wp = winProbFromOdds((d.items || [])[0]);
@@ -1244,11 +1334,13 @@ async function refreshOdds() {
     if (any) renderAll(); // paint the bars in once the odds land
 }
 
-// ===== MATCH NOTIFICATIONS =====
-// OS notifications for favourited teams while the site is open in any tab. We
-// diff each ESPN refresh against the previous snapshot and ping on the three
-// moments that matter: kick-off, a goal, and full-time. (Push when the site is
-// fully closed would need a service worker + server — not built yet.)
+// ===== MATCH NOTIFICATIONS (in-tab) =====
+// Instant OS notifications for favourited teams while the site is open in any
+// tab. We diff each ESPN refresh against the previous snapshot and ping on the
+// three moments that matter: kick-off, a goal, and full-time. When the tab is
+// fully closed, the Web Push path below takes over (server-sent). Both share the
+// same notification `tag` (keyed on the ESPN event id) so the OS collapses a
+// duplicate instead of alerting twice.
 let NOTIFY_SNAP = null; // matchId -> {h, a, st}; null until the first refresh seeds it
 
 const notifySupported = () => typeof Notification !== 'undefined';
@@ -1275,17 +1367,18 @@ function maybeNotifyFavorites() {
             if (!prev) continue;
             const home = TEAM[m.home], away = TEAM[m.away];
             const line = `${home.name} ${m.homeScore ?? 0}–${m.awayScore ?? 0} ${away.name}`;
+            const key = m.espnId || m.id; // align tags with the server push path
 
             if (prev.st !== 'live' && m.status === 'live') {
-                fireNotification('🟢 Kick-off', `${home.name} vs ${away.name} is under way`, `ko-${m.id}`, home);
+                fireNotification('🟢 Kick-off', `${home.name} vs ${away.name} is under way`, `ko-${key}`, home);
             }
             if (m.status === 'live') {
-                const tag = `g-${m.id}-${m.homeScore}-${m.awayScore}`;
+                const tag = `g-${key}-${m.homeScore}-${m.awayScore}`;
                 if ((m.homeScore ?? 0) > prev.h) fireNotification(`⚽ GOAL — ${home.name}!`, line, tag, home);
                 if ((m.awayScore ?? 0) > prev.a) fireNotification(`⚽ GOAL — ${away.name}!`, line, tag, away);
             }
             if (prev.st !== 'finished' && m.status === 'finished') {
-                fireNotification('🏁 Full-time', line, `ft-${m.id}`, null);
+                fireNotification('🏁 Full-time', line, `ft-${key}`, null);
             }
         }
     }
@@ -1320,7 +1413,81 @@ async function onNotifyToggle() {
     updateNotifyToggle();
     if (STATE.notify) {
         fireNotification('🔔 Alerts on', "You'll get kick-off, goal & full-time alerts for your teams.", 'welcome', null);
+        subscribeToPush().catch(() => {}); // background push, when the server's configured
+    } else {
+        unsubscribeFromPush().catch(() => {});
     }
+}
+
+// ===== WEB PUSH (background notifications when the tab is closed) =====
+// Subscribes via the Push API and registers the subscription + the user's
+// favorite team codes with the server, which pushes kick-off/goal/full-time
+// alerts even with no tab open. Degrades silently to in-tab-only when the server
+// isn't push-configured or the browser lacks support.
+const pushSupported = () => 'serviceWorker' in navigator && 'PushManager' in window && typeof atob === 'function';
+
+// VAPID public keys are base64url; the subscribe() call wants a Uint8Array.
+function urlBase64ToUint8Array(base64String) {
+    const padding = '='.repeat((4 - base64String.length % 4) % 4);
+    const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+    const raw = atob(base64);
+    const arr = new Uint8Array(raw.length);
+    for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
+    return arr;
+}
+
+let pushPublicKey; // undefined = unfetched, '' = server not configured
+async function getPushPublicKey() {
+    if (pushPublicKey !== undefined) return pushPublicKey;
+    try {
+        const j = await (await fetch('/api/push-config')).json();
+        pushPublicKey = (j && j.ok && j.publicKey) ? j.publicKey : '';
+    } catch (e) { pushPublicKey = ''; }
+    return pushPublicKey;
+}
+
+async function postSubscription(action, subscription) {
+    try {
+        await fetch('/api/subscribe', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action, subscription, favs: [...STATE.favorites] }),
+        });
+    } catch (e) { /* offline / not configured — in-tab alerts still work */ }
+}
+
+async function subscribeToPush() {
+    if (!pushSupported()) return false;
+    const key = await getPushPublicKey();
+    if (!key) return false; // server hasn't got VAPID keys → in-tab only
+    const reg = await navigator.serviceWorker.ready;
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) {
+        sub = await reg.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey: urlBase64ToUint8Array(key),
+        });
+    }
+    await postSubscription('subscribe', sub);
+    return true;
+}
+
+async function unsubscribeFromPush() {
+    if (!pushSupported()) return;
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.getSubscription();
+    if (!sub) return;
+    await postSubscription('unsubscribe', sub);
+    try { await sub.unsubscribe(); } catch (e) { /* ignore */ }
+}
+
+// Keep the server's copy of the favorites in step when they change (only if the
+// user already opted into push).
+async function syncPushFavorites() {
+    if (!STATE.notify || !pushSupported()) return;
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.getSubscription();
+    if (sub) await postSubscription('subscribe', sub);
 }
 
 // Parse an ESPN match summary into the app's stats + events shape.
@@ -1423,6 +1590,44 @@ function setFooterNote(live, source) {
     else el.innerHTML = `${schedule} · public-domain World Cup 2026 data.`;
 }
 
+// ===== SEO: Schema.org SportsEvent markup =====
+// Emit JSON-LD for the upcoming/live fixtures so search engines can surface them
+// as rich results. Rebuilt from the in-memory schedule on each render (cheap).
+function renderStructuredData() {
+    if (!Array.isArray(MATCHES) || !TEAM) return;
+    const items = MATCHES
+        .filter(m => m.status !== 'finished')
+        .sort((a, b) => instantOf(a) - instantOf(b))
+        .slice(0, 50)
+        .map(m => {
+            const home = TEAM[m.home], away = TEAM[m.away];
+            if (!home || !away) return null;
+            return {
+                '@type': 'SportsEvent',
+                name: `${home.name} vs ${away.name}`,
+                sport: 'Association football',
+                startDate: instantOf(m).toISOString(),
+                eventStatus: 'https://schema.org/EventScheduled',
+                location: { '@type': 'Place', name: m.venue },
+                competitor: [
+                    { '@type': 'SportsTeam', name: home.name },
+                    { '@type': 'SportsTeam', name: away.name },
+                ],
+                superEvent: { '@type': 'SportsEvent', name: 'FIFA World Cup 2026' },
+            };
+        })
+        .filter(Boolean);
+    const payload = { '@context': 'https://schema.org', '@graph': items };
+    let el = document.getElementById('ld-matches');
+    if (!el) {
+        el = document.createElement('script');
+        el.type = 'application/ld+json';
+        el.id = 'ld-matches';
+        document.head.appendChild(el);
+    }
+    el.textContent = JSON.stringify(payload); // JSON.stringify escapes safely
+}
+
 let tickerStarted = false;
 function renderAll() {
     $('#tournamentDay').textContent = `Day ${tournamentDay()} of 39`;
@@ -1434,6 +1639,7 @@ function renderAll() {
     renderScorers();
     renderFavorites();
     renderFavoritesFeed();
+    renderStructuredData();
     if (!tickerStarted) { startLiveTicker(); tickerStarted = true; }
 }
 
@@ -1443,11 +1649,14 @@ function initChrome() {
     saveFavorites(); // seed the cookie from any favorites already in localStorage
     $$('.nav-link').forEach(l => l.addEventListener('click', e => { e.preventDefault(); setSection(l.dataset.section); }));
     $$('.filter-chip').forEach(c => c.addEventListener('click', () => {
-        $$('.filter-chip').forEach(x => x.classList.remove('active'));
+        $$('.filter-chip').forEach(x => { x.classList.remove('active'); x.setAttribute('aria-pressed', 'false'); });
         c.classList.add('active');
+        c.setAttribute('aria-pressed', 'true');
         STATE.filter = c.dataset.filter;
         renderLiveSection();
     }));
+    // Reflect the default-selected chip to assistive tech.
+    $$('.filter-chip').forEach(c => c.setAttribute('aria-pressed', c.classList.contains('active') ? 'true' : 'false'));
     document.addEventListener('click', e => {
         const card = e.target.closest('.match-card');
         if (card && card.dataset.match) { openMatchModal(card.dataset.match); return; }
@@ -1456,6 +1665,17 @@ function initChrome() {
         const fav = e.target.closest('.fav-tile');
         if (fav) toggleFavorite(fav.dataset.fav);
     });
+    // Keyboard equivalent of the above: match cards and fav tiles are role=button
+    // and focusable, so Enter/Space must activate them. (The "View" button is a
+    // real <button>, so its native click already fires — skip it here.)
+    document.addEventListener('keydown', e => {
+        if (e.key !== 'Enter' && e.key !== ' ' && e.key !== 'Spacebar') return;
+        if (e.target.closest('.ft-view')) return;
+        const card = e.target.closest('.match-card');
+        if (card && card.dataset.match) { e.preventDefault(); openMatchModal(card.dataset.match); return; }
+        const fav = e.target.closest('.fav-tile');
+        if (fav) { e.preventDefault(); toggleFavorite(fav.dataset.fav); }
+    });
     $('#modalClose').addEventListener('click', closeModal);
     $('#modalBackdrop').addEventListener('click', e => { if (e.target.id === 'modalBackdrop') closeModal(); });
     document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
@@ -1463,8 +1683,20 @@ function initChrome() {
     updateNotifyToggle();
 }
 
+// Register the service worker for offline app-shell + installability. Kept
+// fully optional: any failure (or an unsupported browser) just means the site
+// runs online-only, exactly as before.
+function registerServiceWorker() {
+    if (!('serviceWorker' in navigator)) return;
+    window.addEventListener('load', () => {
+        navigator.serviceWorker.register('sw.js')
+            .catch(e => console.warn('Service worker registration failed:', e));
+    });
+}
+
 async function boot() {
     initChrome();
+    registerServiceWorker();
     showSkeletons();
     let data, live = true;
     try {
@@ -1477,6 +1709,13 @@ async function boot() {
     setDataset(data);
     renderAll();
     setFooterNote(live, null);
+
+    // If the user already opted into alerts on a previous visit, make sure this
+    // device/browser has a live push subscription (it may be a new device, or the
+    // old subscription may have expired) and that the server has current favs.
+    if (STATE.notify && notifySupported() && Notification.permission === 'granted') {
+        subscribeToPush().catch(() => {});
+    }
 
     // Layer real live scores/stats over the openfootball schedule and keep them
     // fresh. ESPN (keyless, has stats + events) is primary; football-data is the

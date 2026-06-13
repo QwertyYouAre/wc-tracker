@@ -1,0 +1,33 @@
+name: push-tick
+
+# Polls the deployed /api/push-tick endpoint, which checks ESPN for new
+# kick-offs / goals / full-times and sends Web Push alerts to subscribers.
+#
+# GitHub's scheduled runs fire at most every 5 minutes (and can be delayed under
+# load), so goal alerts may arrive up to ~5 min late. For near-instant alerts,
+# use Vercel Cron on a Pro plan (see PUSH_SETUP.md) or a 1-min external pinger.
+#
+# Requires one repo secret: PUSH_TICK_SECRET (same value as the Vercel env var).
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch: {}
+
+# Don't pile up overlapping runs if one is slow.
+concurrency:
+  group: push-tick
+  cancel-in-progress: false
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Trigger push-tick
+        run: |
+          curl -sS -X POST "https://wctracker2026.vercel.app/api/push-tick" \
+            -H "Authorization: Bearer ${PUSH_TICK_SECRET}" \
+            --max-time 60 --fail-with-body
+        env:
+          PUSH_TICK_SECRET: ${{ secrets.PUSH_TICK_SECRET }}
