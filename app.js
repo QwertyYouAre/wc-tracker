@@ -746,6 +746,27 @@ function posBand(abbr) {
     return 2; // CM, LM, RM, M … midfield line
 }
 
+// "4-2-3-1" → [4,2,3,1] (outfield lines, back → front). Null if unparseable.
+function parseFormation(f) {
+    if (!f) return null;
+    const parts = String(f).split(/[^\d]+/).map(n => parseInt(n, 10)).filter(n => n > 0);
+    return parts.length >= 2 ? parts : null;
+}
+
+// Depth of a position for back→front ordering: 7 GK, 6 centre-back, 5 full/wing-
+// back, 4 holding mid, 3 central/wide mid, 2 attacking mid, 1 forward. Tolerant of
+// ESPN's directional suffixes (CD-R, AM-L, …) which the old band logic mishandled.
+function posDepth(abbr) {
+    const a = (abbr || '').toUpperCase();
+    if (a[0] === 'G') return 7;
+    if (a.startsWith('CB') || a.startsWith('CD') || a === 'D' || a === 'SW') return 6;
+    if (a === 'LB' || a === 'RB' || a.endsWith('WB')) return 5;
+    if (a.startsWith('DM') || a.startsWith('CDM')) return 4;
+    if (a.includes('AM') || a === 'SS') return 2;
+    if (a === 'F' || a.startsWith('CF') || a === 'ST' || a === 'S' || a.endsWith('W') || a === 'LF' || a === 'RF') return 1;
+    return 3; // CM, LM, RM, M …
+}
+
 // Finer left→right rank within a band: far-left 0, inside-left 1, centre 2, inside-right 3, far-right 4.
 function posOrder(abbr) {
     const a = (abbr || '').toUpperCase();
@@ -855,23 +876,44 @@ const PITCH_SVG = `<svg class="pitch-lines" viewBox="0 0 100 150" preserveAspect
     <path d="M40 127 A 12 12 0 0 1 60 127"/>
 </svg>`;
 
-// Lay the XI out by real position: each player gets a vertical band (posBand)
-// and a left→right slot within it, so the shape reflects the formation.
-const BAND_Y = [14, 28, 44, 58, 74, 90]; // front line → goalkeeper
-function pitchHtml(starters) {
-    const bands = {};
-    for (const p of starters) (bands[posBand(p.pos)] = bands[posBand(p.pos)] || []).push(p);
+// Lay the XI out to match the actual formation. When ESPN gives a formation
+// string (e.g. "4-2-3-1"), order the outfielders back→front by depth and slice
+// them into that many lines — so the shape is exactly the stated formation. If
+// the formation is missing or its count doesn't match, fall back to bucketing by
+// the per-player band heuristic.
+function pitchHtml(starters, formation) {
+    const gk = starters.filter(p => posDepth(p.pos) >= 7);
+    const outfield = starters.filter(p => posDepth(p.pos) < 7);
+    const counts = parseFormation(formation);
+
+    let rows; // arrays of players, back → front (GK excluded)
+    if (counts && gk.length === 1 && counts.reduce((s, n) => s + n, 0) === outfield.length) {
+        const sorted = outfield.slice().sort((a, b) => posDepth(b.pos) - posDepth(a.pos));
+        rows = [];
+        let i = 0;
+        for (const c of counts) { rows.push(sorted.slice(i, i + c)); i += c; }
+    } else {
+        const bands = {};
+        for (const p of outfield) (bands[posBand(p.pos)] = bands[posBand(p.pos)] || []).push(p);
+        rows = Object.keys(bands).map(Number).sort((a, b) => b - a).map(k => bands[k]);
+    }
+
+    // GK deepest (90%); the outfield lines spread evenly from the back to the front.
+    const L = rows.length;
+    const yFor = (k) => L <= 1 ? 45 : 76 - k * (76 - 12) / (L - 1);
+    const placed = [{ players: gk, y: 90 }, ...rows.map((players, k) => ({ players, y: yFor(k) }))];
+
     let chips = '';
-    Object.keys(bands).forEach(bk => {
-        const row = bands[bk].sort((m, n) =>
+    for (const { players, y } of placed) {
+        const row = players.slice().sort((m, n) =>
             posOrder(m.pos) - posOrder(n.pos) || m.place - n.place || parseInt(m.jersey || 99, 10) - parseInt(n.jersey || 99, 10));
         const n = row.length;
         const margin = n >= 4 ? 13 : n === 3 ? 20 : n === 2 ? 33 : 50;
         row.forEach((p, k) => {
             const x = n === 1 ? 50 : margin + (k / (n - 1)) * (100 - 2 * margin);
-            chips += playerChip(p, x, BAND_Y[+bk]);
+            chips += playerChip(p, x, y);
         });
-    });
+    }
     return `<div class="pitch">${PITCH_SVG}<div class="pitch-players">${chips}</div></div>`;
 }
 
@@ -898,7 +940,7 @@ function lineupContentHtml(code, data) {
         ? `<div class="subs-side">${subsListHtml}${managerHtml}</div>`
         : '';
     return `<p class="lineup-note">${note}</p>
-        <div class="lineup-layout">${subsSide}${pitchHtml(data.lines.flat())}</div>
+        <div class="lineup-layout">${subsSide}${pitchHtml(data.lines.flat(), data.formation)}</div>
         <p class="lineup-foot muted">⚽ goals · 🅰 assists (World Cup 2026) — hover a pitch player for the same.</p>`;
 }
 
