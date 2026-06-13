@@ -248,15 +248,75 @@ function liveLabel(m) {
     return min > 90 ? "LIVE · 90+'" : `LIVE · ${min}'`;
 }
 
-// A slim ESPN win-probability bar (home / draw / away) shown under each card.
-// Renders nothing until that match's odds have loaded.
-function oddsBar(m) {
-    const o = m.odds;
+// ===== LIVE WIN PROBABILITY (estimate) =====
+// No feed offers live in-play odds, so this is a transparent model: take the REAL
+// pre-match win/draw/loss split (from ESPN odds) as the teams' strength, turn it
+// into expected goals, then roll the remaining minutes forward with a Poisson
+// model from the CURRENT score. As goals go in and time runs down the numbers
+// shift. Clearly an estimate — labelled as such, never presented as real odds.
+function poissonPmf(k, lambda) {
+    if (lambda <= 0) return k === 0 ? 1 : 0;
+    let logp = -lambda + k * Math.log(lambda);
+    for (let i = 2; i <= k; i++) logp -= Math.log(i);
+    return Math.exp(logp);
+}
+
+// Full-match home/draw/away probabilities for independent-Poisson goal rates.
+function poissonOutcome(lh, la) {
+    const N = 10;
+    const ph = [], pa = [];
+    for (let k = 0; k <= N; k++) { ph[k] = poissonPmf(k, lh); pa[k] = poissonPmf(k, la); }
+    let H = 0, D = 0, A = 0;
+    for (let i = 0; i <= N; i++) for (let j = 0; j <= N; j++) {
+        const p = ph[i] * pa[j];
+        if (i > j) H += p; else if (i === j) D += p; else A += p;
+    }
+    return { H, D, A };
+}
+
+// Solve for full-match expected goals (λ home/away) consistent with a pre-match
+// win/loss balance and a total-goals line: fix the total, binary-search supremacy.
+function lambdasFromProbs(pH, pA, total) {
+    const mu = (total && total > 0.5) ? total : 2.7;
+    const target = pH / (pH + pA || 1);
+    let lo = -mu * 0.98, hi = mu * 0.98;
+    for (let it = 0; it < 24; it++) {
+        const s = (lo + hi) / 2;
+        const { H, A } = poissonOutcome((mu + s) / 2, (mu - s) / 2);
+        if (H / (H + A || 1) < target) lo = s; else hi = s;
+    }
+    const s = (lo + hi) / 2;
+    return { lh: Math.max(0.05, (mu + s) / 2), la: Math.max(0.05, (mu - s) / 2) };
+}
+
+// Live win/draw/loss estimate for an in-play match (null otherwise).
+function liveWinProb(m) {
+    if (m.status !== 'live' || !m.odds) return null;
+    const lam = m._lam || (m._lam = lambdasFromProbs(m.odds.home / 100, m.odds.away / 100, m.odds.total));
+    const min = m.apiMinute ?? estimateMinute(m);
+    const elapsed = min === 'HT' ? 45 : (typeof min === 'number' ? min : 0);
+    const remain = Math.max(0, 90 - Math.min(elapsed, 90)) / 90;
+    const muH = lam.lh * remain, muA = lam.la * remain;
+    const gd = (m.homeScore || 0) - (m.awayScore || 0);
+    const N = 8;
+    let H = 0, D = 0, A = 0;
+    for (let i = 0; i <= N; i++) for (let j = 0; j <= N; j++) {
+        const p = poissonPmf(i, muH) * poissonPmf(j, muA);
+        const d = gd + i - j;
+        if (d > 0) H += p; else if (d === 0) D += p; else A += p;
+    }
+    const [home, draw, away] = pctTriple(H, D, A);
+    return { home, draw, away };
+}
+
+// One slim W/D/L bar (home / draw / away) with a caption. `est` styles it as the
+// live estimate rather than the market line.
+function winBar(m, o, caption, est) {
     if (!o) return '';
-    const title = `Win probability${o.provider ? ' · ' + o.provider : ''} (via ESPN)`;
-    const aria = `${m.home} ${o.home}%, Draw ${o.draw}%, ${m.away} ${o.away}%`;
+    const aria = `${caption}: ${m.home} ${o.home}%, Draw ${o.draw}%, ${m.away} ${o.away}%`;
     return `
-        <div class="mc-odds" title="${title}">
+        <div class="mc-odds${est ? ' is-est' : ''}">
+            <div class="mco-cap">${caption}</div>
             <div class="mco-bar" role="img" aria-label="${aria}">
                 <span class="mco-h" style="width:${o.home}%"></span>
                 <span class="mco-d" style="width:${o.draw}%"></span>
@@ -268,6 +328,15 @@ function oddsBar(m) {
                 <span class="mco-la">${m.away} ${o.away}%</span>
             </div>
         </div>`;
+}
+
+// The win-probability block for a match: the live in-play estimate (when live)
+// above the real pre-match market line.
+function winBars(m) {
+    const live = liveWinProb(m);
+    const liveHtml = live ? winBar(m, live, '🔴 Live win chance · est.', true) : '';
+    const preHtml = m.odds ? winBar(m, m.odds, `Pre-match odds${m.odds.provider ? ' · ' + m.odds.provider : ''}`, false) : '';
+    return liveHtml + preHtml;
 }
 
 // ===== MATCH CARD =====
@@ -314,7 +383,7 @@ function matchCard(m) {
                 <span class="mc-venue">📍 ${esc(m.venue)}</span>
                 ${countdownHtml}
             </div>
-            ${oddsBar(m)}
+            ${winBars(m)}
         </div>
     `;
 }
@@ -867,6 +936,26 @@ function renderFavoritesFeed() {
 let openMatchId = null;
 
 // The stats + events portion of the modal (re-rendered after ESPN detail loads).
+// The win-prob bars + (when live) the estimate disclaimer. Shared by the initial
+// modal render and the live in-modal refresh.
+function modalBarsInner(m) {
+    const bars = winBars(m);
+    if (!bars) return '';
+    const note = liveWinProb(m)
+        ? '<p class="bars-note muted">Live win chance is an estimate from the current score &amp; time remaining, anchored to the pre-match odds — not live bookmaker odds.</p>'
+        : '';
+    return bars + note;
+}
+
+// Keep the open match modal's win-prob bars current while the match is live.
+function refreshOpenModalBars() {
+    if (!openMatchId) return;
+    const m = MATCHES.find(x => x.id === openMatchId);
+    if (!m || m.status !== 'live') return;
+    const el = document.getElementById('modalBars');
+    if (el) el.innerHTML = modalBarsInner(m);
+}
+
 function modalDetailHtml(m) {
     const home = TEAM[m.home], away = TEAM[m.away];
     const stats = m.stats;
@@ -908,7 +997,9 @@ function modalDetailHtml(m) {
             }).join('')}
         </div>` : (m.status === 'upcoming' ? '<p class="muted" style="text-align:center;padding:1rem 0;">Live commentary begins at kick-off.</p>' : '');
 
-    return statsHtml + eventsHtml;
+    // Win-probability block (live estimate + real pre-match line), in #modalBars
+    // so the open modal can refresh it live without disturbing the rest.
+    return `<div id="modalBars" class="modal-bars">${modalBarsInner(m)}</div>` + statsHtml + eventsHtml;
 }
 
 // Lazily fetch real stats + events from ESPN for the open match.
@@ -1051,11 +1142,12 @@ function setSection(name) {
 
 // ===== LIVE MINUTE TICKER =====
 function startLiveTicker() {
-    // Re-render live cards periodically so estimated minutes advance on screen.
+    // Re-render live cards periodically so estimated minutes (and the live win
+    // chance that depends on them) advance on screen even between data refreshes.
     setInterval(() => {
-        if (MATCHES.some(m => m.status === 'live') && $('#live').classList.contains('active-section')) {
-            renderLiveSection();
-        }
+        if (!MATCHES.some(m => m.status === 'live')) return;
+        if ($('#live').classList.contains('active-section')) renderLiveSection();
+        refreshOpenModalBars();
     }, 20000);
 }
 
@@ -1353,29 +1445,33 @@ function winProbFromOdds(item) {
     const a = americanToProb(item.awayTeamOdds && item.awayTeamOdds.moneyLine);
     if (h == null || d == null || a == null) return null;
     const [home, draw, away] = pctTriple(h, d, a);
-    return { home, draw, away, provider: (item.provider && item.provider.name) || null };
+    const total = typeof item.overUnder === 'number' ? item.overUnder : null; // goals line, for the live model
+    return { home, draw, away, total, provider: (item.provider && item.provider.name) || null };
 }
 
 let oddsBusy = false;
 
-// Fetch a single match's odds once (6KB each); the result is cached on the
-// match so we never refetch. A missing/closed market just leaves no bar.
+// Fetch a single match's odds (~6KB). Cached on the match; live matches refetch
+// each tick so the market line stays current. A missing/closed market = no bar.
 async function loadOddsFor(m) {
-    if (!m.espnId || m.oddsLoaded) return false;
-    m.oddsLoaded = true; // claim it up-front so concurrent ticks don't double-fetch
+    if (!m.espnId) return false;
+    if (m.oddsLoaded && m.status !== 'live') return false; // only live games refetch
+    if (m._oddsBusy) return false; // don't double-fetch the same match concurrently
+    m._oddsBusy = true;
     try {
         const r = await fetch(`${ESPN_CORE_BASE}/events/${m.espnId}/competitions/${m.espnId}/odds`);
         if (!r.ok) return false;
         const d = await r.json();
         const wp = winProbFromOdds((d.items || [])[0]);
-        if (wp) { m.odds = wp; return true; }
+        if (wp) { m.odds = wp; m._lam = null; return true; } // _lam recomputed from fresh odds
     } catch (e) { /* offline / no odds — the card simply omits the bar */ }
+    finally { m.oddsLoaded = true; m._oddsBusy = false; }
     return false;
 }
 
 async function refreshOdds() {
     if (oddsBusy) return;
-    const pending = MATCHES.filter(m => m.espnId && !m.oddsLoaded);
+    const pending = MATCHES.filter(m => m.espnId && (!m.oddsLoaded || m.status === 'live'));
     if (!pending.length) return;
     oddsBusy = true;
     let any = false;
@@ -1711,6 +1807,7 @@ function renderAll() {
     renderFavorites();
     renderFavoritesFeed();
     renderStructuredData();
+    refreshOpenModalBars(); // keep an open live match's win-prob bars current
     if (!tickerStarted) { startLiveTicker(); tickerStarted = true; }
 }
 

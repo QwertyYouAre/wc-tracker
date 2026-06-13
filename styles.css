@@ -391,6 +391,11 @@ img.flag-img.logo-flag   { height: 12px; margin: 0 .1rem; }
 .mco-lh { color: var(--odds-home); }
 .mco-ld { color: var(--text-muted); }
 .mco-la { color: var(--odds-away); }
+.mc-odds + .mc-odds { margin-top: .55rem; }
+.mco-cap { font-size: .62rem; font-weight: 700; text-transform: uppercase; letter-spacing: .4px; color: var(--text-muted); margin-bottom: .28rem; }
+.mc-odds.is-est .mco-cap { color: var(--wc-red); }
+.modal-bars:not(:empty) { margin-bottom: 1.1rem; }
+.bars-note { font-size: .68rem; margin: .45rem 0 0; line-height: 1.35; }
 
 /* GROUPS */
 .groups-grid {
