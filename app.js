@@ -74,6 +74,24 @@ function rankBadge(code) {
     return r ? `<span class="rank-badge" title="FIFA World Ranking">#${r}</span>` : '';
 }
 
+// FIFA code → recent W/D/L form string, harvested from the ESPN scoreboard (which
+// gives it most-recent-FIRST). Filled by refreshESPN.
+const FORM = {};
+
+// Last-five form guide as W/D/L chips, shown oldest → most recent (left to right),
+// so we reverse ESPN's string. Empty when no form is known yet.
+function formGuideHtml(code) {
+    const f = FORM[code];
+    if (!f) return '';
+    const chrono = f.toUpperCase().split('').reverse(); // oldest → latest
+    const chips = chrono.map(ch => {
+        const cls = ch === 'W' ? 'w' : ch === 'L' ? 'l' : 'd';
+        const label = ch === 'W' ? 'Win' : ch === 'L' ? 'Loss' : 'Draw';
+        return `<span class="fg fg-${cls}" title="${label}">${ch}</span>`;
+    }).join('');
+    return `<span class="form-guide" title="Recent form — oldest to latest (left → right)" aria-label="Recent form, oldest to latest: ${chrono.join(', ')}">${chips}</span>`;
+}
+
 function teamFlag(team) {
     if (!team || team.placeholder) return '<span class="flag-img placeholder" aria-hidden="true"></span>';
     const iso = FIFA_TO_ISO[team.code];
@@ -475,8 +493,9 @@ function renderGroups() {
         return `
         <div class="group-card">
             <h3><span><span class="group-letter">${g}</span>Group ${g}</span><span class="muted" style="font-weight:500;font-size:.8rem">${rows.reduce((s, r) => s + r.p, 0) / 2} / 6 played</span></h3>
+            <div class="table-scroll">
             <table class="standings-table">
-                <thead><tr><th>#</th><th>Team</th><th>P</th><th>W</th><th>D</th><th>L</th><th>GD</th><th>Pts</th></tr></thead>
+                <thead><tr><th>#</th><th>Team</th><th>P</th><th>W</th><th>D</th><th>L</th><th>GD</th><th>Pts</th><th class="form-col">Form</th></tr></thead>
                 <tbody>
                     ${rows.map((r, i) => {
                         const pos = i < 2 ? 'pos-q' : i === 2 ? 'pos-3' : 'pos-out';
@@ -490,10 +509,12 @@ function renderGroups() {
                             <td>${r.l}</td>
                             <td>${r.gd >= 0 ? '+' + r.gd : r.gd}</td>
                             <td class="pts">${r.pts}</td>
+                            <td class="form-col">${formGuideHtml(r.team.code)}</td>
                         </tr>`;
                     }).join('')}
                 </tbody>
             </table>
+            </div>
         </div>`;
     }).join('');
 
@@ -903,6 +924,7 @@ async function openLineupModal(code) {
             <div>
                 <div class="lh-name">${esc(t.name)} ${rankBadge(code)}</div>
                 <div class="lh-group">Group ${t.group} · Lineup</div>
+                ${formGuideHtml(code)}
             </div>
         </div>
         <div class="modal-body" id="lineupContent"><div class="empty-state">Loading lineup…</div></div>`;
@@ -1071,12 +1093,14 @@ function openMatchModal(matchId) {
                     <div class="mh-flag">${teamFlag(home)}</div>
                     <div class="mh-name">${esc(home.name)} ${rankBadge(m.home)}</div>
                     ${MANAGERS[m.home] ? `<div class="mh-manager">👔 ${esc(MANAGERS[m.home])}</div>` : ''}
+                    ${formGuideHtml(m.home)}
                 </div>
                 <div class="mh-score">${scoreDisplay}</div>
                 <div class="mh-team">
                     <div class="mh-flag">${teamFlag(away)}</div>
                     <div class="mh-name">${esc(away.name)} ${rankBadge(m.away)}</div>
                     ${MANAGERS[m.away] ? `<div class="mh-manager">👔 ${esc(MANAGERS[m.away])}</div>` : ''}
+                    ${formGuideHtml(m.away)}
                 </div>
             </div>
             <div class="mh-status">${statusLine}</div>
@@ -1390,6 +1414,9 @@ async function refreshESPN() {
         const ab0 = cs[0].team.abbreviation, ab1 = cs[1].team.abbreviation;
         if (cs[0].team.id) ESPN_TEAM_ID[ab0] = cs[0].team.id;
         if (cs[1].team.id) ESPN_TEAM_ID[ab1] = cs[1].team.id;
+        // Recent W/D/L form (later matches in the feed carry the more current form).
+        if (cs[0].form) FORM[ab0] = cs[0].form;
+        if (cs[1].form) FORM[ab1] = cs[1].form;
 
         // Collect goal scorers from this match's details. Counts open-play goals
         // AND scored penalties (ESPN labels those "Penalty - Scored", with no

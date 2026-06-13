@@ -414,7 +414,7 @@ img.flag-img.logo-flag   { height: 12px; margin: 0 .1rem; }
 /* GROUPS */
 .groups-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(min(380px, 100%), 1fr));
     gap: 1.25rem;
 }
 
@@ -802,6 +802,17 @@ img.flag-img.logo-flag   { height: 12px; margin: 0 .1rem; }
 /* FIFA ranking badge — inherits the surrounding text colour at low opacity so it
    works on both light table rows and the dark modal headers. */
 .rank-badge { font-size: .62rem; font-weight: 700; opacity: .55; letter-spacing: .3px; white-space: nowrap; }
+
+/* Recent W/D/L form guide — coloured chips, oldest → latest (left to right) */
+.form-guide { display: inline-flex; gap: 3px; vertical-align: middle; white-space: nowrap; }
+.fg { display: inline-flex; align-items: center; justify-content: center; width: 15px; height: 15px; border-radius: 4px; font-size: .58rem; font-weight: 800; line-height: 1; color: #fff; }
+.fg-w { background: var(--wc-green); }
+.fg-l { background: var(--wc-red); }
+.fg-d { background: #8a8f9a; }
+.form-col { text-align: center; }
+.group-card .table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.modal-header .mh-team .form-guide,
+.lineup-head .form-guide { margin-top: .4rem; }
 
 .modal-header .mh-score {
     font-size: 2.4rem;
