@@ -33,6 +33,27 @@ const FIFA_TO_ISO = {
     ENG:'gb-eng', CRO:'hr', GHA:'gh', PAN:'pa',
 };
 
+// FIFA code → head coach. Static reference data (no live feed carries managers),
+// current for the 2026 World Cup. Update here if a team changes its manager.
+const MANAGERS = {
+    MEX: 'Javier Aguirre',        RSA: 'Hugo Broos',           KOR: 'Hong Myung-bo',
+    CZE: 'Miroslav Koubek',       CAN: 'Jesse Marsch',         BIH: 'Sergej Barbarez',
+    QAT: 'Julen Lopetegui',       SUI: 'Murat Yakin',          BRA: 'Carlo Ancelotti',
+    MAR: 'Walid Regragui',        HAI: 'Sébastien Migné',      SCO: 'Steve Clarke',
+    USA: 'Mauricio Pochettino',   PAR: 'Gustavo Alfaro',       AUS: 'Tony Popovic',
+    TUR: 'Vincenzo Montella',     GER: 'Julian Nagelsmann',    CUW: 'Dick Advocaat',
+    CIV: 'Emerse Faé',            ECU: 'Sebastián Beccacece',  NED: 'Ronald Koeman',
+    JPN: 'Hajime Moriyasu',       SWE: 'Graham Potter',        TUN: 'Sami Trabelsi',
+    BEL: 'Rudi Garcia',           EGY: 'Hossam Hassan',        IRN: 'Amir Ghalenoei',
+    NZL: 'Darren Bazeley',        ESP: 'Luis de la Fuente',    CPV: 'Bubista',
+    KSA: 'Giorgos Donis',         URU: 'Marcelo Bielsa',       FRA: 'Didier Deschamps',
+    SEN: 'Pape Thiaw',            IRQ: 'Graham Arnold',        NOR: 'Ståle Solbakken',
+    ARG: 'Lionel Scaloni',        ALG: 'Vladimir Petković',    AUT: 'Ralf Rangnick',
+    JOR: 'Jamal Sellami',         POR: 'Roberto Martínez',     COD: 'Sébastien Desabre',
+    UZB: 'Fabio Cannavaro',       COL: 'Néstor Lorenzo',       ENG: 'Thomas Tuchel',
+    CRO: 'Zlatko Dalić',          GHA: 'Otto Addo',            PAN: 'Thomas Christiansen',
+};
+
 function teamFlag(team) {
     if (!team || team.placeholder) return '<span class="flag-img placeholder" aria-hidden="true"></span>';
     const iso = FIFA_TO_ISO[team.code];
@@ -728,8 +749,16 @@ function lineupContentHtml(code, data) {
         note = `Starting XI${data.formation ? ` · ${esc(data.formation)}` : ''}${opp ? ` · from ${esc(TEAM[code].name)} v ${esc(opp.name)}` : ''}`;
     }
     const subsLabel = data.presumed ? 'Rest of squad' : 'Substitutes';
-    const subsSide = data.subs.length
-        ? `<div class="subs-side"><h4>${subsLabel}</h4><div class="subs-list">${data.subs.map(subRow).join('')}</div></div>`
+    const subsListHtml = data.subs.length
+        ? `<h4>${subsLabel}</h4><div class="subs-list">${data.subs.map(subRow).join('')}</div>`
+        : '';
+    // Manager sits below the substitutes (static reference — no live feed has it).
+    const manager = MANAGERS[code];
+    const managerHtml = manager
+        ? `<div class="manager-row"><span class="mgr-label">Manager</span><span class="mgr-name">${esc(manager)}</span></div>`
+        : '';
+    const subsSide = (subsListHtml || managerHtml)
+        ? `<div class="subs-side">${subsListHtml}${managerHtml}</div>`
         : '';
     return `<p class="lineup-note">${note}</p>
         <div class="lineup-layout">${subsSide}${pitchHtml(data.lines.flat())}</div>

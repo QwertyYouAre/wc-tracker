@@ -675,6 +675,9 @@ img.flag-img.logo-flag   { height: 12px; margin: 0 .1rem; }
 .subs-side h4 { margin: 0 0 .5rem; font-size: .9rem; color: var(--heading); }
 .subs-list { display: flex; flex-direction: column; gap: .3rem; }
 .sub-row { display: flex; align-items: center; gap: .35rem; background: var(--code-bg); border-radius: 7px; padding: .28rem .4rem; }
+.subs-side .manager-row { margin-top: .7rem; padding-top: .6rem; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: .1rem; }
+.subs-side .mgr-label { font-size: .65rem; text-transform: uppercase; letter-spacing: .5px; color: var(--text-muted); }
+.subs-side .mgr-name { font-weight: 700; font-size: .85rem; }
 .sr-num {
     flex: none; width: 19px; height: 19px;
     display: flex; align-items: center; justify-content: center;
