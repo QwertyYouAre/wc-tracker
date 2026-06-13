@@ -467,13 +467,196 @@ function renderFavorites() {
         const on = STATE.favorites.has(t.code) ? 'on' : '';
         return `<div class="fav-tile ${on}" data-fav="${t.code}">
             <span class="ft-flag">${teamFlag(t)}</span>
-            <div>
+            <div class="ft-info">
                 <div>${t.name}</div>
                 <div class="ft-group">Group ${t.group}</div>
             </div>
+            <button class="ft-view" type="button" data-view="${t.code}">View</button>
             <span class="fav-star">★</span>
         </div>`;
     }).join('');
+}
+
+// ===== TEAM LINEUP (formation, substitutes, WC-2026 goals/assists) =====
+// "Accurate" here means real ESPN data only: for a team that has already played
+// we show their actual XI + formation from the most recent match; for teams yet
+// to kick off we show the official squad grouped by position (no invented XI).
+let lineupToken = 0; // guards against a slow fetch writing into a closed/changed modal
+
+// Tournament assist totals come from ESPN's leaders feed (goals are harvested
+// from the scoreboard in refreshESPN). Fetched once, then cached.
+async function loadWcStats() {
+    if (WC_ASSISTS) return;
+    WC_ASSISTS = {};
+    try {
+        const d = await (await fetch(`${ESPN_CORE_BASE}/seasons/2026/types/1/leaders`)).json();
+        for (const c of (d.categories || [])) {
+            if (c.name !== 'assists') continue;
+            for (const e of (c.leaders || [])) {
+                const mm = String((e.athlete && e.athlete.$ref) || '').match(/athletes\/(\d+)/);
+                if (mm) WC_ASSISTS[mm[1]] = Math.round(parseFloat(e.value) || 0);
+            }
+        }
+    } catch (e) { /* assists simply render as 0 */ }
+}
+
+// Map an ESPN position abbreviation to a pitch line: 0 GK, 1 DEF, 2 MID, 3 FWD.
+function posLine(abbr) {
+    const a = (abbr || '').toUpperCase();
+    if (a[0] === 'G') return 0;
+    if (a === 'D' || a.startsWith('CD') || a.startsWith('CB') || a === 'LB' || a === 'RB' || a.endsWith('WB') || a === 'SW') return 1;
+    if (a === 'F' || a.startsWith('CF') || a === 'ST' || a === 'S' || a === 'LW' || a === 'RW' || a === 'W') return 3;
+    return 2; // DM, CM, LM, RM, AM, M …
+}
+// Rough left→right ordering within a line from the L/R hint in the abbreviation.
+function posX(abbr) {
+    const a = (abbr || '').toUpperCase();
+    if (a.includes('L')) return 0;
+    if (a.includes('R')) return 2;
+    return 1;
+}
+
+function playerObj(athlete, jersey, pos, starter, subbedIn, place) {
+    const at = athlete || {};
+    return {
+        id: at.id, name: at.shortName || at.displayName || '—', full: at.displayName || at.shortName || '',
+        jersey: jersey || '', pos: pos || '', starter: !!starter, subbedIn: !!subbedIn,
+        place: parseInt(place || 0, 10) || 0,
+    };
+}
+
+// A team's roster entry from a match summary → {formation, lines[4][], subs[]}.
+function parseMatchRoster(tr) {
+    const players = (tr.roster || []).map(p =>
+        playerObj(p.athlete, p.jersey, p.position && p.position.abbreviation, p.starter, p.subbedIn, p.formationPlace));
+    const lines = [[], [], [], []];
+    for (const p of players) if (p.starter) lines[posLine(p.pos)].push(p);
+    for (const ln of lines) ln.sort((a, b) => posX(a.pos) - posX(b.pos) || a.place - b.place);
+    const subs = players.filter(p => !p.starter)
+        .sort((a, b) => (b.subbedIn - a.subbedIn) || (parseInt(a.jersey || 99, 10) - parseInt(b.jersey || 99, 10)));
+    return { formation: tr.formation || null, lines, subs, squad: false };
+}
+
+// No match yet → build a default 4-3-3 XI from the official squad (lowest shirt
+// numbers per position), with everyone else on the bench. Flagged as predicted.
+function parseSquad(athletes) {
+    const byLine = [[], [], [], []];
+    for (const a of athletes) {
+        const pos = (a.position && a.position.abbreviation) || '';
+        byLine[posLine(pos)].push(playerObj(a, a.jersey, pos, false, false, 0));
+    }
+    for (const ln of byLine) ln.sort((a, b) => parseInt(a.jersey || 99, 10) - parseInt(b.jersey || 99, 10));
+    const all = byLine.flat();
+    const need = [1, 4, 3, 3]; // GK, DEF, MID, FWD → 4-3-3
+    const lines = [[], [], [], []];
+    const taken = new Set();
+    for (let i = 0; i < 4; i++) for (const p of byLine[i]) { if (lines[i].length >= need[i]) break; lines[i].push(p); taken.add(p); }
+    // If a position group is short, top it up from anyone left so the shape holds.
+    for (let i = 0; i < 4; i++) for (const p of all) { if (lines[i].length >= need[i]) break; if (!taken.has(p)) { lines[i].push(p); taken.add(p); } }
+    const subs = all.filter(p => !taken.has(p)).sort((a, b) => parseInt(a.jersey || 99, 10) - parseInt(b.jersey || 99, 10));
+    return { formation: '4-3-3', lines, subs, presumed: true };
+}
+
+async function loadLineup(code) {
+    if (LINEUP_CACHE[code]) return LINEUP_CACHE[code];
+    // Prefer the real XI from this team's most recent live/finished match.
+    const played = MATCHES
+        .filter(m => (m.home === code || m.away === code) && (m.status === 'live' || m.status === 'finished') && m.espnId)
+        .sort((a, b) => instantOf(b) - instantOf(a))[0];
+    let data = null, fromMatch = null;
+    if (played) {
+        try {
+            const d = await (await fetch(`${ESPN_BASE}/summary?event=${played.espnId}`, { cache: 'no-store' })).json();
+            const tr = (d.rosters || []).find(r => r.team && r.team.abbreviation === code);
+            if (tr && tr.roster && tr.roster.length) { data = parseMatchRoster(tr); fromMatch = played; }
+        } catch (e) { /* fall through to squad */ }
+    }
+    if (!data && ESPN_TEAM_ID[code]) {
+        try {
+            const d = await (await fetch(`${ESPN_BASE}/teams/${ESPN_TEAM_ID[code]}/roster`, { cache: 'no-store' })).json();
+            if (d.athletes && d.athletes.length) data = parseSquad(d.athletes);
+        } catch (e) { /* none available */ }
+    }
+    if (data) { data.fromMatch = fromMatch; LINEUP_CACHE[code] = data; }
+    return data;
+}
+
+function playerChip(p) {
+    const g = WC_GOALS[p.id] || 0, a = (WC_ASSISTS && WC_ASSISTS[p.id]) || 0;
+    const gl = `${g} ${g === 1 ? 'goal' : 'goals'}`, al = `${a} ${a === 1 ? 'assist' : 'assists'}`;
+    const badge = (g || a) ? `<span class="pc-badge">${g ? `⚽${g}` : ''}${g && a ? ' ' : ''}${a ? `🅰${a}` : ''}</span>` : '';
+    const inMark = p.subbedIn ? '<span class="pc-in" title="Came on as a substitute">▲</span>' : '';
+    return `<div class="player-chip" tabindex="0" aria-label="${p.full}, ${gl}, ${al}">
+        <span class="pc-num">${p.jersey || '·'}</span>
+        <span class="pc-name">${p.name}${inMark}</span>
+        ${badge}
+        <span class="pc-tip">${p.full}<br>⚽ ${gl} · 🅰 ${al}<span class="pc-tip-sub">World Cup 2026</span></span>
+    </div>`;
+}
+
+// Football-pitch markings (portrait), stretched behind the players.
+const PITCH_SVG = `<svg class="pitch-lines" viewBox="0 0 100 150" preserveAspectRatio="none" aria-hidden="true">
+    <rect x="1" y="1" width="98" height="148" rx="2"/>
+    <line x1="1" y1="75" x2="99" y2="75"/>
+    <circle cx="50" cy="75" r="12"/>
+    <circle class="spot" cx="50" cy="75" r="1"/>
+    <rect x="21" y="1" width="58" height="22"/>
+    <rect x="37" y="1" width="26" height="8"/>
+    <circle class="spot" cx="50" cy="15" r="1"/>
+    <path d="M40 23 A 12 12 0 0 0 60 23"/>
+    <rect x="21" y="127" width="58" height="22"/>
+    <rect x="37" y="141" width="26" height="8"/>
+    <circle class="spot" cx="50" cy="135" r="1"/>
+    <path d="M40 127 A 12 12 0 0 1 60 127"/>
+</svg>`;
+
+function pitchHtml(lines) {
+    // Render forwards at the top down to the keeper at the bottom (attacking up).
+    const order = [3, 2, 1, 0];
+    const rows = order.map(i => lines[i].length
+        ? `<div class="pitch-row">${lines[i].map(playerChip).join('')}</div>` : '').join('');
+    return `<div class="pitch">${PITCH_SVG}<div class="pitch-players">${rows}</div></div>`;
+}
+
+function lineupContentHtml(code, data) {
+    if (!data) return '<div class="empty-state">Lineup isn’t available yet for this team.</div>';
+    let note;
+    if (data.presumed) {
+        note = `Predicted XI · ${data.formation} — ${TEAM[code].name} haven’t kicked off yet, so this is a default shape, not a confirmed lineup.`;
+    } else {
+        const fm = data.fromMatch;
+        const opp = fm ? TEAM[fm.home === code ? fm.away : fm.home] : null;
+        note = `Starting XI${data.formation ? ` · ${data.formation}` : ''}${opp ? ` · from ${TEAM[code].name} v ${opp.name}` : ''}`;
+    }
+    const subsLabel = data.presumed ? 'Rest of squad' : 'Substitutes';
+    return `<p class="lineup-note">${note}</p>
+        ${pitchHtml(data.lines)}
+        ${data.subs.length ? `<div class="subs-block"><h4>${subsLabel}</h4><div class="subs-grid">${data.subs.map(playerChip).join('')}</div></div>` : ''}
+        <p class="lineup-foot muted">Hover a player for their World Cup 2026 goals &amp; assists.</p>`;
+}
+
+async function openLineupModal(code) {
+    const t = TEAM[code];
+    if (!t) return;
+    const tok = ++lineupToken;
+    openMatchId = null;
+    $('#modalBody').innerHTML = `
+        <div class="modal-header lineup-head">
+            <div class="lh-flag">${teamFlag(t)}</div>
+            <div>
+                <div class="lh-name">${t.name}</div>
+                <div class="lh-group">Group ${t.group} · Lineup</div>
+            </div>
+        </div>
+        <div class="modal-body" id="lineupContent"><div class="empty-state">Loading lineup…</div></div>`;
+    $('#modalBackdrop').classList.add('open');
+    $('#modalBackdrop').setAttribute('aria-hidden', 'false');
+
+    await loadWcStats();
+    const data = await loadLineup(code);
+    if (tok !== lineupToken) return; // modal was closed or another team opened meanwhile
+    const el = document.getElementById('lineupContent');
+    if (el) el.innerHTML = lineupContentHtml(code, data);
 }
 
 // Persist favorites to localStorage (browser) AND a cookie (so the
@@ -862,7 +1045,14 @@ async function refreshScores() {
 // scores, minute, stats and events. Called directly from the browser. Its team
 // abbreviations match the app's FIFA codes exactly.
 const ESPN_BASE = 'https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world';
+const ESPN_CORE_BASE = 'https://sports.core.api.espn.com/v2/sports/soccer/leagues/fifa.world';
 const ESPN_STATE = { in: 'live', post: 'finished' };
+
+// Reference data harvested from ESPN, used by the team lineup view.
+const ESPN_TEAM_ID = {};   // FIFA code -> ESPN numeric team id (from the scoreboard)
+let WC_GOALS = {};         // ESPN athlete id -> tournament goals (rebuilt each refresh)
+let WC_ASSISTS = null;     // ESPN athlete id -> tournament assists (lazy, from leaders)
+const LINEUP_CACHE = {};   // FIFA code -> parsed lineup
 
 async function refreshESPN() {
     let data;
@@ -876,11 +1066,14 @@ async function refreshESPN() {
     for (const m of MATCHES) byPair.set(pairKey(m.home, m.away), m);
     let applied = 0;
     const goalLog = []; // tournament-wide goals for the top-scorers list
+    const goalsById = {}; // ESPN athlete id -> goals, for the lineup view
     for (const ev of (data.events || [])) {
         const comp = ev.competitions && ev.competitions[0];
         const cs = (comp && comp.competitors) || [];
         if (cs.length < 2) continue;
         const ab0 = cs[0].team.abbreviation, ab1 = cs[1].team.abbreviation;
+        if (cs[0].team.id) ESPN_TEAM_ID[ab0] = cs[0].team.id;
+        if (cs[1].team.id) ESPN_TEAM_ID[ab1] = cs[1].team.id;
 
         // Collect goal scorers from this match's details (excludes own goals).
         const idToCode = { [cs[0].id]: ab0, [cs[1].id]: ab1 };
@@ -889,8 +1082,9 @@ async function refreshESPN() {
             // Real goals only — skip own goals and VAR-disallowed "goals".
             if (!/goal/i.test(tyt) || /own goal/i.test(tyt) || /disallow|no goal|ruled out|cancell?ed/i.test(tyt)) continue;
             const code = idToCode[det.team && det.team.id];
-            const ath = det.athletesInvolved && det.athletesInvolved[0] && det.athletesInvolved[0].displayName;
-            if (code && ath) goalLog.push({ player: ath, code });
+            const a0 = det.athletesInvolved && det.athletesInvolved[0];
+            if (code && a0 && a0.displayName) goalLog.push({ player: a0.displayName, code });
+            if (a0 && a0.id) goalsById[a0.id] = (goalsById[a0.id] || 0) + 1;
         }
 
         const m = byPair.get(pairKey(ab0, ab1));
@@ -913,6 +1107,7 @@ async function refreshESPN() {
         applied++;
     }
     ESPN_GOALS = goalLog;
+    WC_GOALS = goalsById;
     setFooterNote(true, 'espn');
     maybeNotifyFavorites(); // OS alerts for favourited teams' kick-offs / goals / FT
     if (applied || goalLog.length) renderAll();
@@ -1192,7 +1387,9 @@ function initChrome() {
     }));
     document.addEventListener('click', e => {
         const card = e.target.closest('.match-card');
-        if (card && card.dataset.match) openMatchModal(card.dataset.match);
+        if (card && card.dataset.match) { openMatchModal(card.dataset.match); return; }
+        const view = e.target.closest('.ft-view');
+        if (view) { openLineupModal(view.dataset.view); return; } // before the fav toggle
         const fav = e.target.closest('.fav-tile');
         if (fav) toggleFavorite(fav.dataset.fav);
     });
