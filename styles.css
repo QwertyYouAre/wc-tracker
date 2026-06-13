@@ -182,20 +182,6 @@ main { min-height: calc(100vh - 250px); padding: 2rem 0 4rem; }
     border-bottom: 2px solid var(--border);
 }
 
-.fav-feed-badge {
-    display: inline-block;
-    margin-left: .5rem;
-    vertical-align: middle;
-    background: var(--wc-purple);
-    color: #fff;
-    font-size: .62rem;
-    font-weight: 700;
-    letter-spacing: .04em;
-    text-transform: uppercase;
-    padding: .15rem .45rem;
-    border-radius: 999px;
-}
-
 .match-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
