@@ -932,11 +932,13 @@ function openMatchModal(matchId) {
                 <div class="mh-team">
                     <div class="mh-flag">${teamFlag(home)}</div>
                     <div class="mh-name">${esc(home.name)}</div>
+                    ${MANAGERS[m.home] ? `<div class="mh-manager">👔 ${esc(MANAGERS[m.home])}</div>` : ''}
                 </div>
                 <div class="mh-score">${scoreDisplay}</div>
                 <div class="mh-team">
                     <div class="mh-flag">${teamFlag(away)}</div>
                     <div class="mh-name">${esc(away.name)}</div>
+                    ${MANAGERS[m.away] ? `<div class="mh-manager">👔 ${esc(MANAGERS[m.away])}</div>` : ''}
                 </div>
             </div>
             <div class="mh-status">${statusLine}</div>
