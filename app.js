@@ -490,7 +490,6 @@ function toggleFavorite(code) {
     if (STATE.favorites.has(code)) STATE.favorites.delete(code);
     else STATE.favorites.add(code);
     saveFavorites();
-    syncPushTeams(); // keep the server's per-subscription team list in step
     renderFavorites();
     renderLiveSection();
     renderGroups();
@@ -988,82 +987,13 @@ async function refreshOdds() {
 }
 
 // ===== MATCH NOTIFICATIONS =====
-// OS notifications for favourited teams' kick-offs, goals and full-times.
-// Two delivery paths:
-//   • Push (preferred): a service worker + backend deliver alerts even when the
-//     app is closed — this is what works on mobile, including installed iOS.
-//   • Legacy foreground: if no push backend is configured, fall back to in-page
-//     Notifications that only fire while a tab is open (desktop).
+// OS notifications for favourited teams while the site is open in any tab. We
+// diff each ESPN refresh against the previous snapshot and ping on the three
+// moments that matter: kick-off, a goal, and full-time. (Push when the site is
+// fully closed would need a service worker + server — not built yet.)
 let NOTIFY_SNAP = null; // matchId -> {h, a, st}; null until the first refresh seeds it
 
 const notifySupported = () => typeof Notification !== 'undefined';
-const pushSupported = () => 'serviceWorker' in navigator && 'PushManager' in window;
-const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent || '') ||
-    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-const isStandalone = () =>
-    window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
-
-const PUSH = { reg: null, ready: false, publicKey: null };
-const pushActive = () => PUSH.ready && STATE.notify;
-
-// VAPID public keys are base64url; the subscribe() call wants a Uint8Array.
-function urlBase64ToUint8Array(base64) {
-    const pad = '='.repeat((4 - (base64.length % 4)) % 4);
-    const raw = atob((base64 + pad).replace(/-/g, '+').replace(/_/g, '/'));
-    return Uint8Array.from([...raw].map((c) => c.charCodeAt(0)));
-}
-
-// Register the worker and learn whether the push backend is live (/api/vapid).
-async function initPush() {
-    if (!pushSupported()) return;
-    try {
-        PUSH.reg = await navigator.serviceWorker.register('/sw.js');
-        const d = await (await fetch('/api/vapid', { cache: 'no-store' })).json();
-        if (d && d.ok && d.publicKey) { PUSH.ready = true; PUSH.publicKey = d.publicKey; }
-    } catch (e) { /* push stays off; the legacy fallback still works */ }
-    // Re-assert an existing subscription on load so the server keeps a fresh
-    // record (and the latest team list) without re-prompting.
-    if (PUSH.ready && STATE.notify && notifySupported() && Notification.permission === 'granted') {
-        try { await subscribePush(); } catch (e) { /* ignore */ }
-    }
-}
-
-async function subscribePush() {
-    const sub = await PUSH.reg.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(PUSH.publicKey),
-    });
-    await fetch('/api/subscribe', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ subscription: sub, teams: [...STATE.favorites] }),
-    });
-    return sub;
-}
-
-async function unsubscribePush() {
-    try {
-        const sub = await PUSH.reg.pushManager.getSubscription();
-        if (!sub) return;
-        await fetch('/api/unsubscribe', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ endpoint: sub.endpoint }),
-        });
-        await sub.unsubscribe();
-    } catch (e) { /* ignore */ }
-}
-
-// Mirror the current favourite list to the server when it changes mid-subscription.
-async function syncPushTeams() {
-    if (!pushActive() || !PUSH.reg) return;
-    try {
-        const sub = await PUSH.reg.pushManager.getSubscription();
-        if (!sub) return;
-        await fetch('/api/subscribe', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ subscription: sub, teams: [...STATE.favorites] }),
-        });
-    } catch (e) { /* ignore */ }
-}
 
 function fireNotification(title, body, tag, iconTeam) {
     if (!notifySupported() || Notification.permission !== 'granted') return;
@@ -1074,14 +1004,13 @@ function fireNotification(title, body, tag, iconTeam) {
 }
 
 function maybeNotifyFavorites() {
+    if (!notifySupported()) return;
     const snapNow = {};
     for (const m of MATCHES) snapNow[m.id] = { h: m.homeScore ?? 0, a: m.awayScore ?? 0, st: m.status };
 
-    // When push is active the backend sends alerts (even with the tab open), so
-    // skip the in-page path to avoid duplicates. Only fire here as the fallback,
-    // and only once a prior snapshot exists (don't ping for already-live games).
-    const usePage = notifySupported() && !pushActive() && STATE.notify && Notification.permission === 'granted';
-    if (NOTIFY_SNAP && usePage) {
+    // Only diff once a prior snapshot exists from a real ESPN refresh — this
+    // avoids firing for matches that were already live when the page loaded.
+    if (NOTIFY_SNAP && STATE.notify && Notification.permission === 'granted') {
         for (const m of MATCHES) {
             if (!isFavMatch(m)) continue;
             const prev = NOTIFY_SNAP[m.id];
@@ -1107,59 +1036,28 @@ function maybeNotifyFavorites() {
 
 function updateNotifyToggle() {
     const btn = $('#notifyToggle');
-    const hint = $('#notifyHint');
     if (!btn) return;
-    const setHint = (txt) => { if (hint) { hint.textContent = txt || ''; hint.hidden = !txt; } };
-
-    if (!pushSupported() && !notifySupported()) { btn.hidden = true; setHint(''); return; }
-
-    // iOS only allows web push from a Home-Screen-installed app.
-    if (PUSH.ready && isIOS && !isStandalone()) {
-        btn.disabled = false;
-        btn.classList.remove('on');
-        btn.textContent = '📲 Add to Home Screen to enable alerts';
-        setHint('On iPhone/iPad: tap the Share button, choose “Add to Home Screen”, then open WC Tracker from that icon and tap here again.');
-        return;
-    }
-    if (notifySupported() && Notification.permission === 'denied') {
+    if (!notifySupported()) { btn.hidden = true; return; }
+    if (Notification.permission === 'denied') {
         btn.disabled = true;
         btn.classList.remove('on');
         btn.textContent = '🔕 Alerts blocked — enable them in your browser settings';
-        setHint('');
         return;
     }
-    const on = STATE.notify && (!notifySupported() || Notification.permission === 'granted');
+    const on = STATE.notify && Notification.permission === 'granted';
     btn.disabled = false;
     btn.classList.toggle('on', on);
     btn.textContent = on ? '🔔 Match alerts on — tap to turn off' : '🔔 Notify me about my teams';
-    setHint('');
 }
 
 async function onNotifyToggle() {
-    // iOS in a normal Safari tab can't subscribe — the hint tells them to install.
-    if (PUSH.ready && isIOS && !isStandalone()) { updateNotifyToggle(); return; }
-
-    if (PUSH.ready) {
-        if (!STATE.notify) {
-            try {
-                if (notifySupported() && Notification.permission !== 'granted') {
-                    if (await Notification.requestPermission() !== 'granted') { updateNotifyToggle(); return; }
-                }
-                await subscribePush();
-                STATE.notify = true;
-            } catch (e) { STATE.notify = false; }
-        } else {
-            await unsubscribePush();
-            STATE.notify = false;
-        }
-    } else if (notifySupported()) {
-        if (Notification.permission === 'default') {
-            STATE.notify = (await Notification.requestPermission()) === 'granted';
-        } else if (Notification.permission === 'granted') {
-            STATE.notify = !STATE.notify; // toggle off/on without re-prompting
-        }
-    } else return;
-
+    if (!notifySupported()) return;
+    if (Notification.permission === 'default') {
+        const res = await Notification.requestPermission();
+        STATE.notify = res === 'granted';
+    } else if (Notification.permission === 'granted') {
+        STATE.notify = !STATE.notify; // toggle off/on without re-prompting
+    }
     localStorage.setItem('wc26-notify', STATE.notify ? '1' : '0');
     updateNotifyToggle();
     if (STATE.notify) {
@@ -1303,7 +1201,6 @@ function initChrome() {
     document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
     $('#notifyToggle').addEventListener('click', onNotifyToggle);
     updateNotifyToggle();
-    initPush().then(updateNotifyToggle); // register SW + detect push backend, then refresh the button
 }
 
 async function boot() {
