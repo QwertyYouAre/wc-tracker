@@ -2,6 +2,7 @@
 
 const STATE = {
     favorites: new Set(JSON.parse(localStorage.getItem('wc26-favs') || '[]')),
+    notify: localStorage.getItem('wc26-notify') === '1',
     filter: 'all',
     standings: {}, // groupLetter -> sorted [{ team, p, w, d, l, gf, ga, gd, pts }]
 };
@@ -873,8 +874,88 @@ async function refreshESPN() {
     }
     ESPN_GOALS = goalLog;
     setFooterNote(true, 'espn');
+    maybeNotifyFavorites(); // OS alerts for favourited teams' kick-offs / goals / FT
     if (applied || goalLog.length) renderAll();
     return true;
+}
+
+// ===== MATCH NOTIFICATIONS =====
+// OS notifications for favourited teams while the site is open in any tab. We
+// diff each ESPN refresh against the previous snapshot and ping on the three
+// moments that matter: kick-off, a goal, and full-time. (Push when the site is
+// fully closed would need a service worker + server — not built yet.)
+let NOTIFY_SNAP = null; // matchId -> {h, a, st}; null until the first refresh seeds it
+
+const notifySupported = () => typeof Notification !== 'undefined';
+
+function fireNotification(title, body, tag, iconTeam) {
+    if (!notifySupported() || Notification.permission !== 'granted') return;
+    const iso = iconTeam && FIFA_TO_ISO[iconTeam.code];
+    try {
+        new Notification(title, { body, tag, icon: iso ? `flags/${iso}.png` : undefined });
+    } catch (e) { /* some mobile browsers throw on construction — ignore */ }
+}
+
+function maybeNotifyFavorites() {
+    if (!notifySupported()) return;
+    const snapNow = {};
+    for (const m of MATCHES) snapNow[m.id] = { h: m.homeScore ?? 0, a: m.awayScore ?? 0, st: m.status };
+
+    // Only diff once a prior snapshot exists from a real ESPN refresh — this
+    // avoids firing for matches that were already live when the page loaded.
+    if (NOTIFY_SNAP && STATE.notify && Notification.permission === 'granted') {
+        for (const m of MATCHES) {
+            if (!isFavMatch(m)) continue;
+            const prev = NOTIFY_SNAP[m.id];
+            if (!prev) continue;
+            const home = TEAM[m.home], away = TEAM[m.away];
+            const line = `${home.name} ${m.homeScore ?? 0}–${m.awayScore ?? 0} ${away.name}`;
+
+            if (prev.st !== 'live' && m.status === 'live') {
+                fireNotification('🟢 Kick-off', `${home.name} vs ${away.name} is under way`, `ko-${m.id}`, home);
+            }
+            if (m.status === 'live') {
+                const tag = `g-${m.id}-${m.homeScore}-${m.awayScore}`;
+                if ((m.homeScore ?? 0) > prev.h) fireNotification(`⚽ GOAL — ${home.name}!`, line, tag, home);
+                if ((m.awayScore ?? 0) > prev.a) fireNotification(`⚽ GOAL — ${away.name}!`, line, tag, away);
+            }
+            if (prev.st !== 'finished' && m.status === 'finished') {
+                fireNotification('🏁 Full-time', line, `ft-${m.id}`, null);
+            }
+        }
+    }
+    NOTIFY_SNAP = snapNow;
+}
+
+function updateNotifyToggle() {
+    const btn = $('#notifyToggle');
+    if (!btn) return;
+    if (!notifySupported()) { btn.hidden = true; return; }
+    if (Notification.permission === 'denied') {
+        btn.disabled = true;
+        btn.classList.remove('on');
+        btn.textContent = '🔕 Alerts blocked — enable them in your browser settings';
+        return;
+    }
+    const on = STATE.notify && Notification.permission === 'granted';
+    btn.disabled = false;
+    btn.classList.toggle('on', on);
+    btn.textContent = on ? '🔔 Match alerts on — tap to turn off' : '🔔 Notify me about my teams';
+}
+
+async function onNotifyToggle() {
+    if (!notifySupported()) return;
+    if (Notification.permission === 'default') {
+        const res = await Notification.requestPermission();
+        STATE.notify = res === 'granted';
+    } else if (Notification.permission === 'granted') {
+        STATE.notify = !STATE.notify; // toggle off/on without re-prompting
+    }
+    localStorage.setItem('wc26-notify', STATE.notify ? '1' : '0');
+    updateNotifyToggle();
+    if (STATE.notify) {
+        fireNotification('🔔 Alerts on', "You'll get kick-off, goal & full-time alerts for your teams.", 'welcome', null);
+    }
 }
 
 // Parse an ESPN match summary into the app's stats + events shape.
@@ -1000,6 +1081,8 @@ function initChrome() {
     $('#modalClose').addEventListener('click', closeModal);
     $('#modalBackdrop').addEventListener('click', e => { if (e.target.id === 'modalBackdrop') closeModal(); });
     document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+    $('#notifyToggle').addEventListener('click', onNotifyToggle);
+    updateNotifyToggle();
 }
 
 async function boot() {

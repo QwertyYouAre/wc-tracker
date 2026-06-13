@@ -182,6 +182,29 @@ main { min-height: calc(100vh - 250px); padding: 2rem 0 4rem; }
     border-bottom: 2px solid var(--border);
 }
 
+.notify-toggle {
+    margin-top: .85rem;
+    display: inline-flex;
+    align-items: center;
+    gap: .45rem;
+    background: var(--bg-card);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: .5rem .95rem;
+    font-size: .85rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background .15s, border-color .15s, color .15s;
+}
+.notify-toggle:hover:not(:disabled) { border-color: var(--wc-purple); }
+.notify-toggle.on {
+    background: var(--wc-purple);
+    border-color: var(--wc-purple);
+    color: #fff;
+}
+.notify-toggle:disabled { opacity: .65; cursor: default; }
+
 .match-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
