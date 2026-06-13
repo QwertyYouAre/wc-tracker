@@ -448,16 +448,25 @@ function renderBracket() {
 
 // ===== TOP SCORERS =====
 function renderScorers() {
-    const list = computeScorers();
+    let list = computeScorers();
+    // Top 10, but keep anyone tied on goals with the 10th-placed player.
+    if (list.length > 10) {
+        const cutoff = list[9].goals;
+        list = list.filter(s => s.goals >= cutoff);
+    }
+    // Shared rank for ties (1, 2, 2, 2, …) — standard competition ranking.
+    let rank = 0, prevGoals = null;
     $('#scorersBody').innerHTML = list.length
-        ? list.map((s, i) => `
+        ? list.map((s, i) => {
+            if (s.goals !== prevGoals) { rank = i + 1; prevGoals = s.goals; }
+            return `
             <tr>
-                <td>${i + 1}</td>
+                <td>${rank}</td>
                 <td><strong>${s.player}</strong></td>
                 <td class="team-cell"><span class="mini-flag">${teamFlag(s.team)}</span>${s.team.name}</td>
                 <td class="goals-cell">${s.goals}</td>
-            </tr>
-        `).join('')
+            </tr>`;
+        }).join('')
         : '<tr><td colspan="4" class="muted" style="text-align:center;padding:1rem;">No goals scored yet — the tournament has just begun.</td></tr>';
 }
 
