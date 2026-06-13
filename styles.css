@@ -610,17 +610,8 @@ img.flag-img.logo-flag   { height: 12px; margin: 0 .1rem; }
     fill: none; stroke: rgba(255,255,255,.45); stroke-width: 1.3; vector-effect: non-scaling-stroke;
 }
 .pitch-lines .spot { fill: rgba(255,255,255,.55); stroke: none; }
-.pitch-players {
-    position: relative;
-    z-index: 1;
-    height: 100%;
-    display: flex;
-    flex-direction: column;
-    justify-content: space-between;
-    gap: .6rem;
-    padding: 1.1rem .45rem;
-}
-.pitch-row { display: flex; justify-content: space-around; flex-wrap: wrap; gap: .5rem .3rem; }
+.pitch-players { position: relative; z-index: 1; height: 100%; }
+.pitch-players .player-chip { position: absolute; transform: translate(-50%, -50%); width: max-content; }
 
 .player-chip {
     position: relative;
@@ -661,23 +652,32 @@ img.flag-img.logo-flag   { height: 12px; margin: 0 .1rem; }
 .pc-tip::after { content: ''; position: absolute; top: 100%; left: 50%; transform: translateX(-50%); border: 6px solid transparent; border-top-color: #11131a; }
 .pc-tip-sub { display: block; margin-top: .15rem; font-size: .62rem; opacity: .65; }
 .player-chip:hover .pc-tip, .player-chip:focus .pc-tip, .player-chip:focus-within .pc-tip { opacity: 1; visibility: visible; }
-/* First (GK) row: flip the tooltip below so it isn't clipped at the modal top. */
-.pitch-row:first-child .pc-tip { bottom: auto; top: calc(100% + 8px); }
-.pitch-row:first-child .pc-tip::after { top: auto; bottom: 100%; border-top-color: transparent; border-bottom-color: #11131a; }
+/* Front-line players: flip the tooltip below so it isn't clipped at the pitch top. */
+.player-chip.tip-below .pc-tip { bottom: auto; top: calc(100% + 8px); }
+.player-chip.tip-below .pc-tip::after { top: auto; bottom: 100%; border-top-color: transparent; border-bottom-color: #11131a; }
 
-.subs-block { margin-top: 1.1rem; }
-.subs-block h4 { margin: 0 0 .6rem; font-size: .95rem; color: var(--heading); }
-.subs-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
-    gap: .8rem .4rem;
-    background: var(--code-bg);
-    border-radius: 10px;
-    padding: .9rem .5rem;
+/* Substitutes panel — to the left of the pitch */
+.lineup-layout { display: flex; gap: .7rem; align-items: flex-start; }
+.lineup-layout .pitch { flex: 1 1 auto; max-width: none; margin: 0; }
+.subs-side { flex: 0 0 138px; }
+.subs-side h4 { margin: 0 0 .5rem; font-size: .9rem; color: var(--heading); }
+.subs-list { display: flex; flex-direction: column; gap: .3rem; }
+.sub-row { display: flex; align-items: center; gap: .35rem; background: var(--code-bg); border-radius: 7px; padding: .28rem .4rem; }
+.sr-num {
+    flex: none; width: 19px; height: 19px;
+    display: flex; align-items: center; justify-content: center;
+    border-radius: 50%; background: var(--placeholder-bg); color: var(--text);
+    font-weight: 800; font-size: .6rem;
 }
-.subs-grid .pc-num { background: var(--placeholder-bg); color: var(--text); }
-.subs-grid .pc-name { color: var(--text); text-shadow: none; }
-.subs-grid .pc-badge { background: var(--border-strong); color: var(--text); }
+.sr-name { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: .72rem; font-weight: 700; color: var(--text); }
+.sr-name .pc-in { color: #d9a400; }
+.sr-ga { flex: none; display: flex; gap: .25rem; font-size: .64rem; font-weight: 800; color: var(--text-muted); white-space: nowrap; }
+
+@media (max-width: 540px) {
+    .lineup-layout { flex-direction: column; }
+    .subs-side { flex: none; width: 100%; order: 2; }
+    .subs-list { display: grid; grid-template-columns: 1fr 1fr; gap: .3rem; }
+}
 
 /* MODAL */
 .modal-backdrop {

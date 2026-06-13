@@ -516,6 +516,30 @@ function posX(abbr) {
     return 1;
 }
 
+// Vertical band on the pitch from a position abbreviation (0 front line → 5 GK).
+// This is what tucks a CDM below the CMs and keeps wingers up with the striker.
+function posBand(abbr) {
+    const a = (abbr || '').toUpperCase();
+    if (a[0] === 'G') return 5;
+    if (a === 'DM' || a === 'CDM') return 3;                                   // holding mid, just behind the CMs
+    if (a === 'D' || a.startsWith('CB') || a.startsWith('CD') || a === 'SW'
+        || a === 'LB' || a === 'RB' || a.endsWith('WB')) return 4;            // back line
+    if (a === 'AM' || a === 'CAM' || a === 'SS') return 1;                     // No.10 line
+    if (a === 'F' || a === 'CF' || a.startsWith('CF') || a === 'ST' || a === 'S'
+        || a === 'LW' || a === 'RW' || a === 'W' || a === 'LF' || a === 'RF') return 0; // front line (wingers + striker)
+    return 2; // CM, LM, RM, M … midfield line
+}
+
+// Finer left→right rank within a band: far-left 0, inside-left 1, centre 2, inside-right 3, far-right 4.
+function posOrder(abbr) {
+    const a = (abbr || '').toUpperCase();
+    if (a === 'LB' || a === 'LWB' || a === 'LM' || a === 'LW' || a === 'LF') return 0;
+    if (a.endsWith('-L')) return 1;
+    if (a === 'RB' || a === 'RWB' || a === 'RM' || a === 'RW' || a === 'RF') return 4;
+    if (a.endsWith('-R')) return 3;
+    return 2;
+}
+
 function playerObj(athlete, jersey, pos, starter, subbedIn, place) {
     const at = athlete || {};
     return {
@@ -581,12 +605,17 @@ async function loadLineup(code) {
     return data;
 }
 
-function playerChip(p) {
+// playerChip(p) → bench chip (flows in a grid). playerChip(p, x, y) → pitch chip
+// absolutely placed at x%,y% on the field.
+function playerChip(p, x, y) {
     const g = WC_GOALS[p.id] || 0, a = (WC_ASSISTS && WC_ASSISTS[p.id]) || 0;
     const gl = `${g} ${g === 1 ? 'goal' : 'goals'}`, al = `${a} ${a === 1 ? 'assist' : 'assists'}`;
     const badge = (g || a) ? `<span class="pc-badge">${g ? `⚽${g}` : ''}${g && a ? ' ' : ''}${a ? `🅰${a}` : ''}</span>` : '';
     const inMark = p.subbedIn ? '<span class="pc-in" title="Came on as a substitute">▲</span>' : '';
-    return `<div class="player-chip" tabindex="0" aria-label="${p.full}, ${gl}, ${al}">
+    const onPitch = x != null;
+    const style = onPitch ? ` style="left:${x.toFixed(1)}%;top:${y}%"` : '';
+    const flip = onPitch && y < 30 ? ' tip-below' : ''; // front-line tooltips open downward
+    return `<div class="player-chip${flip}"${style} tabindex="0" aria-label="${p.full}, ${gl}, ${al}">
         <span class="pc-num">${p.jersey || '·'}</span>
         <span class="pc-name">${p.name}${inMark}</span>
         ${badge}
@@ -610,12 +639,24 @@ const PITCH_SVG = `<svg class="pitch-lines" viewBox="0 0 100 150" preserveAspect
     <path d="M40 127 A 12 12 0 0 1 60 127"/>
 </svg>`;
 
-function pitchHtml(lines) {
-    // Render forwards at the top down to the keeper at the bottom (attacking up).
-    const order = [3, 2, 1, 0];
-    const rows = order.map(i => lines[i].length
-        ? `<div class="pitch-row">${lines[i].map(playerChip).join('')}</div>` : '').join('');
-    return `<div class="pitch">${PITCH_SVG}<div class="pitch-players">${rows}</div></div>`;
+// Lay the XI out by real position: each player gets a vertical band (posBand)
+// and a left→right slot within it, so the shape reflects the formation.
+const BAND_Y = [14, 28, 44, 58, 74, 90]; // front line → goalkeeper
+function pitchHtml(starters) {
+    const bands = {};
+    for (const p of starters) (bands[posBand(p.pos)] = bands[posBand(p.pos)] || []).push(p);
+    let chips = '';
+    Object.keys(bands).forEach(bk => {
+        const row = bands[bk].sort((m, n) =>
+            posOrder(m.pos) - posOrder(n.pos) || m.place - n.place || parseInt(m.jersey || 99, 10) - parseInt(n.jersey || 99, 10));
+        const n = row.length;
+        const margin = n >= 4 ? 13 : n === 3 ? 20 : n === 2 ? 33 : 50;
+        row.forEach((p, k) => {
+            const x = n === 1 ? 50 : margin + (k / (n - 1)) * (100 - 2 * margin);
+            chips += playerChip(p, x, BAND_Y[+bk]);
+        });
+    });
+    return `<div class="pitch">${PITCH_SVG}<div class="pitch-players">${chips}</div></div>`;
 }
 
 function lineupContentHtml(code, data) {
@@ -629,10 +670,23 @@ function lineupContentHtml(code, data) {
         note = `Starting XI${data.formation ? ` · ${data.formation}` : ''}${opp ? ` · from ${TEAM[code].name} v ${opp.name}` : ''}`;
     }
     const subsLabel = data.presumed ? 'Rest of squad' : 'Substitutes';
+    const subsSide = data.subs.length
+        ? `<div class="subs-side"><h4>${subsLabel}</h4><div class="subs-list">${data.subs.map(subRow).join('')}</div></div>`
+        : '';
     return `<p class="lineup-note">${note}</p>
-        ${pitchHtml(data.lines)}
-        ${data.subs.length ? `<div class="subs-block"><h4>${subsLabel}</h4><div class="subs-grid">${data.subs.map(playerChip).join('')}</div></div>` : ''}
-        <p class="lineup-foot muted">Hover a player for their World Cup 2026 goals &amp; assists.</p>`;
+        <div class="lineup-layout">${subsSide}${pitchHtml(data.lines.flat())}</div>
+        <p class="lineup-foot muted">⚽ goals · 🅰 assists (World Cup 2026) — hover a pitch player for the same.</p>`;
+}
+
+// A substitute's row for the left-hand panel: number, name, and WC-2026 G/A.
+function subRow(p) {
+    const g = WC_GOALS[p.id] || 0, a = (WC_ASSISTS && WC_ASSISTS[p.id]) || 0;
+    const inMark = p.subbedIn ? ' <span class="pc-in" title="Came on as a substitute">▲</span>' : '';
+    return `<div class="sub-row" tabindex="0" aria-label="${p.full}, ${g} goals, ${a} assists">
+        <span class="sr-num">${p.jersey || '·'}</span>
+        <span class="sr-name">${p.name}${inMark}</span>
+        <span class="sr-ga"><span title="Goals">⚽${g}</span><span title="Assists">🅰${a}</span></span>
+    </div>`;
 }
 
 async function openLineupModal(code) {
