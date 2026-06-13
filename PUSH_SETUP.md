@@ -43,12 +43,13 @@ It runs every ~5 min. Trigger a manual run from the **Actions** tab to test.
 
 > **Latency:** GitHub cron fires at most every 5 min and can lag under load, so
 > goal alerts may be up to ~5 min late. For near-instant alerts, pick **one** of:
-> - **Vercel Cron (needs Pro):** `vercel.json` already declares a 1-minute cron
->   on `/api/push-tick`. Set a `CRON_SECRET` env var in Vercel — Vercel sends it
->   as `Authorization: Bearer <CRON_SECRET>`, which `api/push-tick.js` already
->   accepts. On Hobby this cron is throttled to once per day, so keep GitHub
->   Actions instead. **Don't run both** GitHub Actions and Vercel Cron at once —
->   disable one to avoid double-polling.
+> - **Vercel Cron:** `vercel.json` declares a cron on `/api/push-tick`. ⚠️ The
+>   Hobby plan **rejects the whole deployment** if the schedule runs more often
+>   than once per day, so it's set to daily (`0 0 * * *`). **On Pro, change it to
+>   `* * * * *`** for 1-minute alerts. Set a `CRON_SECRET` env var in Vercel —
+>   Vercel sends it as `Authorization: Bearer <CRON_SECRET>`, which
+>   `api/push-tick.js` already accepts. **Don't run both** GitHub Actions and a
+>   frequent Vercel Cron at once — disable one to avoid double-polling.
 > - **External pinger** (cron-job.org, 1-min free): POST to `/api/push-tick` with
 >   header `Authorization: Bearer <PUSH_TICK_SECRET>`.
 
