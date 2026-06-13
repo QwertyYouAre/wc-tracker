@@ -23,6 +23,16 @@
     <meta name="twitter:title" content="WC Tracker — FIFA World Cup 2026">
     <meta name="twitter:description" content="Group standings, knockout bracket, top scorers, and match schedules in your local time. Follow your favorite teams.">
     <meta name="twitter:image" content="https://wctracker2026.vercel.app/og-image.png">
+
+    <!-- PWA / installable app — required for push notifications, especially on iOS -->
+    <link rel="manifest" href="manifest.webmanifest">
+    <meta name="theme-color" content="#4f1d8c">
+    <link rel="apple-touch-icon" href="apple-touch-icon.png">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="WC Tracker">
+
     <link rel="stylesheet" href="styles.css">
     <script>
         // Apply saved theme + mobile detection before first paint (no flash / reflow).
@@ -171,6 +181,7 @@
                     <h2>★ Favorites</h2>
                     <p class="muted">Pick teams to follow. They'll be highlighted across the app and filtered into a personal feed.</p>
                     <button class="notify-toggle" id="notifyToggle" type="button">🔔 Notify me about my teams</button>
+                    <p class="muted notify-hint" id="notifyHint" hidden></p>
                 </div>
 
                 <div class="day-block fav-feed" id="favFeed" hidden>

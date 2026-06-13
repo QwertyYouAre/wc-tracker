@@ -24,6 +24,9 @@
     --heading: var(--wc-purple-dark);
     --placeholder-bg: #d1d5db;
     --placeholder-text: #6b7280;
+    --odds-home: #6d28d9;
+    --odds-draw: #9ca3af;
+    --odds-away: #e6195a;
 }
 
 :root[data-theme="dark"] {
@@ -43,6 +46,9 @@
     --heading: #c4b5fd;
     --placeholder-bg: #3a3f50;
     --placeholder-text: #c5cad6;
+    --odds-home: #a78bfa;
+    --odds-draw: #7b8194;
+    --odds-away: #ff5d86;
 }
 
 html { color-scheme: light; }
@@ -351,6 +357,30 @@ img.flag-img.logo-flag   { height: 12px; margin: 0 .1rem; }
 
 .mc-venue { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mc-countdown { color: var(--wc-pink); font-weight: 700; }
+
+/* Win-probability bar — home / draw / away, from ESPN odds */
+.mc-odds { margin-top: .7rem; }
+.mco-bar {
+    display: flex;
+    height: 8px;
+    border-radius: 999px;
+    overflow: hidden;
+    background: var(--border);
+}
+.mco-bar span { display: block; height: 100%; }
+.mco-h { background: var(--odds-home); }
+.mco-d { background: var(--odds-draw); }
+.mco-a { background: var(--odds-away); }
+.mco-legend {
+    display: flex;
+    justify-content: space-between;
+    margin-top: .35rem;
+    font-size: .72rem;
+    font-weight: 700;
+}
+.mco-lh { color: var(--odds-home); }
+.mco-ld { color: var(--text-muted); }
+.mco-la { color: var(--odds-away); }
 
 /* GROUPS */
 .groups-grid {

@@ -203,6 +203,28 @@ function liveLabel(m) {
     return min > 90 ? "LIVE · 90+'" : `LIVE · ${min}'`;
 }
 
+// A slim ESPN win-probability bar (home / draw / away) shown under each card.
+// Renders nothing until that match's odds have loaded.
+function oddsBar(m) {
+    const o = m.odds;
+    if (!o) return '';
+    const title = `Win probability${o.provider ? ' · ' + o.provider : ''} (via ESPN)`;
+    const aria = `${m.home} ${o.home}%, Draw ${o.draw}%, ${m.away} ${o.away}%`;
+    return `
+        <div class="mc-odds" title="${title}">
+            <div class="mco-bar" role="img" aria-label="${aria}">
+                <span class="mco-h" style="width:${o.home}%"></span>
+                <span class="mco-d" style="width:${o.draw}%"></span>
+                <span class="mco-a" style="width:${o.away}%"></span>
+            </div>
+            <div class="mco-legend">
+                <span class="mco-lh">${m.home} ${o.home}%</span>
+                <span class="mco-ld">Draw ${o.draw}%</span>
+                <span class="mco-la">${m.away} ${o.away}%</span>
+            </div>
+        </div>`;
+}
+
 // ===== MATCH CARD =====
 function matchCard(m) {
     const home = TEAM[m.home], away = TEAM[m.away];
@@ -246,6 +268,7 @@ function matchCard(m) {
                 <span class="mc-venue">📍 ${m.venue}</span>
                 ${countdownHtml}
             </div>
+            ${oddsBar(m)}
         </div>
     `;
 }
@@ -467,6 +490,7 @@ function toggleFavorite(code) {
     if (STATE.favorites.has(code)) STATE.favorites.delete(code);
     else STATE.favorites.add(code);
     saveFavorites();
+    syncPushTeams(); // keep the server's per-subscription team list in step
     renderFavorites();
     renderLiveSection();
     renderGroups();
@@ -872,13 +896,13 @@ async function refreshESPN() {
 
         const m = byPair.get(pairKey(ab0, ab1));
         if (!m) continue;
+        m.espnId = ev.id; // keep for win-odds + lazy detail, even while still 'pre'
         const st = ESPN_STATE[ev.status.type.state];
-        if (!st) continue; // 'pre' → leave upcoming
+        if (!st) continue; // 'pre' → leave upcoming (odds still load below)
         const score = {}; score[ab0] = parseInt(cs[0].score, 10); score[ab1] = parseInt(cs[1].score, 10);
         if (isNaN(score[m.home]) || isNaN(score[m.away])) continue;
         m.homeScore = score[m.home]; m.awayScore = score[m.away];
         m.status = st;
-        m.espnId = ev.id;
         if (st === 'live') {
             m.espnLoaded = false; // refetch detail on next open (stats change)
             const t = ev.status.type || {};
@@ -896,14 +920,150 @@ async function refreshESPN() {
     return true;
 }
 
+// ===== WIN PROBABILITY (ESPN sportsbook odds → implied %) =====
+// ESPN serves real, per-match odds via its core API. We take the home/draw/away
+// American moneylines, convert each to an implied probability, then strip the
+// book's built-in margin (the "vig") by normalising the three to 100% — giving
+// an honest win/draw/win split straight from ESPN's own odds feed.
+const ESPN_CORE = 'https://sports.core.api.espn.com/v2/sports/soccer/leagues/fifa.world';
+
+function americanToProb(ml) {
+    const n = typeof ml === 'string' ? parseInt(ml.replace(/[+\s]/g, ''), 10) : ml;
+    if (n == null || isNaN(n)) return null;
+    return n < 0 ? -n / (-n + 100) : 100 / (n + 100);
+}
+
+// Split three raw weights into whole percentages that always sum to 100
+// (largest-remainder rounding), so the bar fills exactly and labels add up.
+function pctTriple(h, d, a) {
+    const raw = [h, d, a], sum = h + d + a;
+    const scaled = raw.map(v => (v / sum) * 100);
+    const out = scaled.map(Math.floor);
+    let left = 100 - out.reduce((x, y) => x + y, 0);
+    const order = scaled.map((v, i) => [v - Math.floor(v), i]).sort((p, q) => q[0] - p[0]);
+    for (let i = 0; i < left; i++) out[order[i][1]]++;
+    return out;
+}
+
+function winProbFromOdds(item) {
+    if (!item) return null;
+    const h = americanToProb(item.homeTeamOdds && item.homeTeamOdds.moneyLine);
+    const d = americanToProb(item.drawOdds && item.drawOdds.moneyLine);
+    const a = americanToProb(item.awayTeamOdds && item.awayTeamOdds.moneyLine);
+    if (h == null || d == null || a == null) return null;
+    const [home, draw, away] = pctTriple(h, d, a);
+    return { home, draw, away, provider: (item.provider && item.provider.name) || null };
+}
+
+let oddsBusy = false;
+
+// Fetch a single match's odds once (6KB each); the result is cached on the
+// match so we never refetch. A missing/closed market just leaves no bar.
+async function loadOddsFor(m) {
+    if (!m.espnId || m.oddsLoaded) return false;
+    m.oddsLoaded = true; // claim it up-front so concurrent ticks don't double-fetch
+    try {
+        const r = await fetch(`${ESPN_CORE}/events/${m.espnId}/competitions/${m.espnId}/odds`);
+        if (!r.ok) return false;
+        const d = await r.json();
+        const wp = winProbFromOdds((d.items || [])[0]);
+        if (wp) { m.odds = wp; return true; }
+    } catch (e) { /* offline / no odds — the card simply omits the bar */ }
+    return false;
+}
+
+async function refreshOdds() {
+    if (oddsBusy) return;
+    const pending = MATCHES.filter(m => m.espnId && !m.oddsLoaded);
+    if (!pending.length) return;
+    oddsBusy = true;
+    let any = false;
+    const LIMIT = 6; // gentle concurrency so we don't hammer ESPN
+    for (let i = 0; i < pending.length; i += LIMIT) {
+        const got = await Promise.all(pending.slice(i, i + LIMIT).map(loadOddsFor));
+        if (got.some(Boolean)) any = true;
+    }
+    oddsBusy = false;
+    if (any) renderAll(); // paint the bars in once the odds land
+}
+
 // ===== MATCH NOTIFICATIONS =====
-// OS notifications for favourited teams while the site is open in any tab. We
-// diff each ESPN refresh against the previous snapshot and ping on the three
-// moments that matter: kick-off, a goal, and full-time. (Push when the site is
-// fully closed would need a service worker + server — not built yet.)
+// OS notifications for favourited teams' kick-offs, goals and full-times.
+// Two delivery paths:
+//   • Push (preferred): a service worker + backend deliver alerts even when the
+//     app is closed — this is what works on mobile, including installed iOS.
+//   • Legacy foreground: if no push backend is configured, fall back to in-page
+//     Notifications that only fire while a tab is open (desktop).
 let NOTIFY_SNAP = null; // matchId -> {h, a, st}; null until the first refresh seeds it
 
 const notifySupported = () => typeof Notification !== 'undefined';
+const pushSupported = () => 'serviceWorker' in navigator && 'PushManager' in window;
+const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent || '') ||
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const isStandalone = () =>
+    window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+
+const PUSH = { reg: null, ready: false, publicKey: null };
+const pushActive = () => PUSH.ready && STATE.notify;
+
+// VAPID public keys are base64url; the subscribe() call wants a Uint8Array.
+function urlBase64ToUint8Array(base64) {
+    const pad = '='.repeat((4 - (base64.length % 4)) % 4);
+    const raw = atob((base64 + pad).replace(/-/g, '+').replace(/_/g, '/'));
+    return Uint8Array.from([...raw].map((c) => c.charCodeAt(0)));
+}
+
+// Register the worker and learn whether the push backend is live (/api/vapid).
+async function initPush() {
+    if (!pushSupported()) return;
+    try {
+        PUSH.reg = await navigator.serviceWorker.register('/sw.js');
+        const d = await (await fetch('/api/vapid', { cache: 'no-store' })).json();
+        if (d && d.ok && d.publicKey) { PUSH.ready = true; PUSH.publicKey = d.publicKey; }
+    } catch (e) { /* push stays off; the legacy fallback still works */ }
+    // Re-assert an existing subscription on load so the server keeps a fresh
+    // record (and the latest team list) without re-prompting.
+    if (PUSH.ready && STATE.notify && notifySupported() && Notification.permission === 'granted') {
+        try { await subscribePush(); } catch (e) { /* ignore */ }
+    }
+}
+
+async function subscribePush() {
+    const sub = await PUSH.reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(PUSH.publicKey),
+    });
+    await fetch('/api/subscribe', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ subscription: sub, teams: [...STATE.favorites] }),
+    });
+    return sub;
+}
+
+async function unsubscribePush() {
+    try {
+        const sub = await PUSH.reg.pushManager.getSubscription();
+        if (!sub) return;
+        await fetch('/api/unsubscribe', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ endpoint: sub.endpoint }),
+        });
+        await sub.unsubscribe();
+    } catch (e) { /* ignore */ }
+}
+
+// Mirror the current favourite list to the server when it changes mid-subscription.
+async function syncPushTeams() {
+    if (!pushActive() || !PUSH.reg) return;
+    try {
+        const sub = await PUSH.reg.pushManager.getSubscription();
+        if (!sub) return;
+        await fetch('/api/subscribe', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ subscription: sub, teams: [...STATE.favorites] }),
+        });
+    } catch (e) { /* ignore */ }
+}
 
 function fireNotification(title, body, tag, iconTeam) {
     if (!notifySupported() || Notification.permission !== 'granted') return;
@@ -914,13 +1074,14 @@ function fireNotification(title, body, tag, iconTeam) {
 }
 
 function maybeNotifyFavorites() {
-    if (!notifySupported()) return;
     const snapNow = {};
     for (const m of MATCHES) snapNow[m.id] = { h: m.homeScore ?? 0, a: m.awayScore ?? 0, st: m.status };
 
-    // Only diff once a prior snapshot exists from a real ESPN refresh — this
-    // avoids firing for matches that were already live when the page loaded.
-    if (NOTIFY_SNAP && STATE.notify && Notification.permission === 'granted') {
+    // When push is active the backend sends alerts (even with the tab open), so
+    // skip the in-page path to avoid duplicates. Only fire here as the fallback,
+    // and only once a prior snapshot exists (don't ping for already-live games).
+    const usePage = notifySupported() && !pushActive() && STATE.notify && Notification.permission === 'granted';
+    if (NOTIFY_SNAP && usePage) {
         for (const m of MATCHES) {
             if (!isFavMatch(m)) continue;
             const prev = NOTIFY_SNAP[m.id];
@@ -946,28 +1107,59 @@ function maybeNotifyFavorites() {
 
 function updateNotifyToggle() {
     const btn = $('#notifyToggle');
+    const hint = $('#notifyHint');
     if (!btn) return;
-    if (!notifySupported()) { btn.hidden = true; return; }
-    if (Notification.permission === 'denied') {
+    const setHint = (txt) => { if (hint) { hint.textContent = txt || ''; hint.hidden = !txt; } };
+
+    if (!pushSupported() && !notifySupported()) { btn.hidden = true; setHint(''); return; }
+
+    // iOS only allows web push from a Home-Screen-installed app.
+    if (PUSH.ready && isIOS && !isStandalone()) {
+        btn.disabled = false;
+        btn.classList.remove('on');
+        btn.textContent = '📲 Add to Home Screen to enable alerts';
+        setHint('On iPhone/iPad: tap the Share button, choose “Add to Home Screen”, then open WC Tracker from that icon and tap here again.');
+        return;
+    }
+    if (notifySupported() && Notification.permission === 'denied') {
         btn.disabled = true;
         btn.classList.remove('on');
         btn.textContent = '🔕 Alerts blocked — enable them in your browser settings';
+        setHint('');
         return;
     }
-    const on = STATE.notify && Notification.permission === 'granted';
+    const on = STATE.notify && (!notifySupported() || Notification.permission === 'granted');
     btn.disabled = false;
     btn.classList.toggle('on', on);
     btn.textContent = on ? '🔔 Match alerts on — tap to turn off' : '🔔 Notify me about my teams';
+    setHint('');
 }
 
 async function onNotifyToggle() {
-    if (!notifySupported()) return;
-    if (Notification.permission === 'default') {
-        const res = await Notification.requestPermission();
-        STATE.notify = res === 'granted';
-    } else if (Notification.permission === 'granted') {
-        STATE.notify = !STATE.notify; // toggle off/on without re-prompting
-    }
+    // iOS in a normal Safari tab can't subscribe — the hint tells them to install.
+    if (PUSH.ready && isIOS && !isStandalone()) { updateNotifyToggle(); return; }
+
+    if (PUSH.ready) {
+        if (!STATE.notify) {
+            try {
+                if (notifySupported() && Notification.permission !== 'granted') {
+                    if (await Notification.requestPermission() !== 'granted') { updateNotifyToggle(); return; }
+                }
+                await subscribePush();
+                STATE.notify = true;
+            } catch (e) { STATE.notify = false; }
+        } else {
+            await unsubscribePush();
+            STATE.notify = false;
+        }
+    } else if (notifySupported()) {
+        if (Notification.permission === 'default') {
+            STATE.notify = (await Notification.requestPermission()) === 'granted';
+        } else if (Notification.permission === 'granted') {
+            STATE.notify = !STATE.notify; // toggle off/on without re-prompting
+        }
+    } else return;
+
     localStorage.setItem('wc26-notify', STATE.notify ? '1' : '0');
     updateNotifyToggle();
     if (STATE.notify) {
@@ -1111,6 +1303,7 @@ function initChrome() {
     document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
     $('#notifyToggle').addEventListener('click', onNotifyToggle);
     updateNotifyToggle();
+    initPush().then(updateNotifyToggle); // register SW + detect push backend, then refresh the button
 }
 
 async function boot() {
@@ -1132,7 +1325,7 @@ async function boot() {
     // fresh. ESPN (keyless, has stats + events) is primary; football-data is the
     // fallback. Both no-op gracefully if unreachable.
     if (live) {
-        const tick = () => refreshESPN().then(ok => { if (!ok) refreshScores(); });
+        const tick = () => refreshESPN().then(ok => { if (!ok) refreshScores(); }).then(refreshOdds);
         await tick(); // initial live layer over the schedule
 
         // Auto-refresh so the viewer never has to reload. Poll faster while a

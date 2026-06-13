@@ -1,0 +1,16 @@
+{
+  "name": "WC Tracker — FIFA World Cup 2026",
+  "short_name": "WC Tracker",
+  "description": "Schedule, live scores, win odds, and match alerts for the FIFA World Cup 2026.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#2e0e57",
+  "theme_color": "#4f1d8c",
+  "orientation": "portrait-primary",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
