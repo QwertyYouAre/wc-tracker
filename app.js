@@ -502,7 +502,7 @@ function renderGroups() {
                         const fav = STATE.favorites.has(r.team.code) ? 'fav' : '';
                         return `<tr class="${pos} ${fav}">
                             <td>${i + 1}</td>
-                            <td class="team-cell"><span class="mini-flag">${teamFlag(r.team)}</span>${r.team.name} ${rankBadge(r.team.code)}</td>
+                            <td class="team-cell team-link" data-lineup="${r.team.code}" role="button" tabindex="0" title="View ${esc(r.team.name)} lineup" aria-label="${esc('View ' + r.team.name + ' lineup')}"><span class="mini-flag">${teamFlag(r.team)}</span>${r.team.name} ${rankBadge(r.team.code)}</td>
                             <td>${r.p}</td>
                             <td>${r.w}</td>
                             <td>${r.d}</td>
@@ -524,7 +524,7 @@ function renderGroups() {
         <tr class="${i < 8 ? 'in-r32' : ''}">
             <td>${i + 1}</td>
             <td><span class="mc-group-tag">${t.group}</span></td>
-            <td class="team-cell"><span class="mini-flag">${teamFlag(t.team)}</span>${t.team.name} ${rankBadge(t.team.code)}</td>
+            <td class="team-cell team-link" data-lineup="${t.team.code}" role="button" tabindex="0" title="View ${esc(t.team.name)} lineup" aria-label="${esc('View ' + t.team.name + ' lineup')}"><span class="mini-flag">${teamFlag(t.team)}</span>${t.team.name} ${rankBadge(t.team.code)}</td>
             <td>${t.p}</td>
             <td>${t.w}</td>
             <td>${t.d}</td>
@@ -1903,17 +1903,21 @@ function initChrome() {
         if (card && card.dataset.match) { openMatchModal(card.dataset.match); return; }
         const view = e.target.closest('.ft-view');
         if (view) { openLineupModal(view.dataset.view); return; } // before the fav toggle
+        const lineup = e.target.closest('[data-lineup]'); // e.g. a team in the standings
+        if (lineup) { openLineupModal(lineup.dataset.lineup); return; }
         const fav = e.target.closest('.fav-tile');
         if (fav) toggleFavorite(fav.dataset.fav);
     });
-    // Keyboard equivalent of the above: match cards and fav tiles are role=button
-    // and focusable, so Enter/Space must activate them. (The "View" button is a
-    // real <button>, so its native click already fires — skip it here.)
+    // Keyboard equivalent of the above: match cards, standings teams and fav tiles
+    // are role=button and focusable, so Enter/Space must activate them. (The "View"
+    // button is a real <button>, so its native click already fires — skip it here.)
     document.addEventListener('keydown', e => {
         if (e.key !== 'Enter' && e.key !== ' ' && e.key !== 'Spacebar') return;
         if (e.target.closest('.ft-view')) return;
         const card = e.target.closest('.match-card');
         if (card && card.dataset.match) { e.preventDefault(); openMatchModal(card.dataset.match); return; }
+        const lineup = e.target.closest('[data-lineup]');
+        if (lineup) { e.preventDefault(); openLineupModal(lineup.dataset.lineup); return; }
         const fav = e.target.closest('.fav-tile');
         if (fav) { e.preventDefault(); toggleFavorite(fav.dataset.fav); }
     });

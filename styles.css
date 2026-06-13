@@ -476,6 +476,13 @@ img.flag-img.logo-flag   { height: 12px; margin: 0 .1rem; }
 
 .standings-table tr.fav td.team-cell::after { content: '★'; color: var(--wc-gold); margin-left: .25rem; }
 
+/* Team name in the standings is a button → opens that team's lineup */
+.team-link { cursor: pointer; }
+.team-link:hover { color: var(--wc-purple); text-decoration: underline; text-underline-offset: 2px; }
+[data-theme="dark"] .team-link:hover { color: var(--wc-gold); }
+.team-link:focus-visible { outline: 2px solid var(--wc-gold); outline-offset: -2px; border-radius: 4px; }
+.hint { font-size: .8rem; margin: -.25rem 0 1rem; }
+
 .standings-table tr.pos-q { background: var(--row-q); }
 .standings-table tr.pos-q td:first-child { border-left: 3px solid var(--wc-green); }
 
