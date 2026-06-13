@@ -54,6 +54,24 @@ const MANAGERS = {
     CRO: 'Zlatko Dalić',          GHA: 'Otto Addo',            PAN: 'Thomas Christiansen',
 };
 
+// FIFA code → FIFA/Coca-Cola Men's World Ranking position. Static reference (no
+// live feed carries it), from the June 2026 ranking. Update if FIFA re-ranks.
+const FIFA_RANK = {
+    ARG: 1,  ESP: 2,  FRA: 3,  ENG: 4,  POR: 5,  BRA: 6,  MAR: 7,  NED: 8,  BEL: 9,  GER: 10,
+    CRO: 11, COL: 13, MEX: 14, SEN: 15, URU: 16, USA: 17, JPN: 18, SUI: 19, IRN: 20, TUR: 22,
+    ECU: 23, AUT: 24, KOR: 25, AUS: 27, ALG: 28, EGY: 29, CAN: 30, NOR: 31, CIV: 33, PAN: 34,
+    SWE: 38, CZE: 40, PAR: 41, SCO: 42, TUN: 45, COD: 46, UZB: 50, QAT: 56, IRQ: 57, RSA: 60,
+    KSA: 61, JOR: 63, BIH: 64, CPV: 67, GHA: 73, CUW: 82, HAI: 83, NZL: 85,
+};
+
+// Small "#12" badge for a team's FIFA ranking. Inherits the surrounding text
+// colour at reduced opacity, so it reads on both light rows and the dark modal
+// headers. Empty string when the code is unknown (e.g. a bracket placeholder).
+function rankBadge(code) {
+    const r = FIFA_RANK[code];
+    return r ? `<span class="rank-badge" title="FIFA World Ranking">#${r}</span>` : '';
+}
+
 function teamFlag(team) {
     if (!team || team.placeholder) return '<span class="flag-img placeholder" aria-hidden="true"></span>';
     const iso = FIFA_TO_ISO[team.code];
@@ -284,12 +302,12 @@ function matchCard(m) {
             <div class="mc-teams">
                 <div class="mc-team">
                     <span class="mc-flag">${teamFlag(home)}</span>
-                    <span class="mc-name">${esc(home.name)}</span>
+                    <span class="mc-name">${esc(home.name)} ${rankBadge(m.home)}</span>
                 </div>
                 ${scoreHtml}
                 <div class="mc-team away">
                     <span class="mc-flag">${teamFlag(away)}</span>
-                    <span class="mc-name">${esc(away.name)}</span>
+                    <span class="mc-name">${esc(away.name)} ${rankBadge(m.away)}</span>
                 </div>
             </div>
             <div class="mc-bottom">
@@ -367,7 +385,7 @@ function renderGroups() {
                         const fav = STATE.favorites.has(r.team.code) ? 'fav' : '';
                         return `<tr class="${pos} ${fav}">
                             <td>${i + 1}</td>
-                            <td class="team-cell"><span class="mini-flag">${teamFlag(r.team)}</span>${r.team.name}</td>
+                            <td class="team-cell"><span class="mini-flag">${teamFlag(r.team)}</span>${r.team.name} ${rankBadge(r.team.code)}</td>
                             <td>${r.p}</td>
                             <td>${r.w}</td>
                             <td>${r.d}</td>
@@ -387,7 +405,7 @@ function renderGroups() {
         <tr class="${i < 8 ? 'in-r32' : ''}">
             <td>${i + 1}</td>
             <td><span class="mc-group-tag">${t.group}</span></td>
-            <td class="team-cell"><span class="mini-flag">${teamFlag(t.team)}</span>${t.team.name}</td>
+            <td class="team-cell"><span class="mini-flag">${teamFlag(t.team)}</span>${t.team.name} ${rankBadge(t.team.code)}</td>
             <td>${t.p}</td>
             <td>${t.w}</td>
             <td>${t.d}</td>
@@ -785,7 +803,7 @@ async function openLineupModal(code) {
         <div class="modal-header lineup-head">
             <div class="lh-flag">${teamFlag(t)}</div>
             <div>
-                <div class="lh-name">${esc(t.name)}</div>
+                <div class="lh-name">${esc(t.name)} ${rankBadge(code)}</div>
                 <div class="lh-group">Group ${t.group} · Lineup</div>
             </div>
         </div>
@@ -931,13 +949,13 @@ function openMatchModal(matchId) {
             <div class="mh-teams">
                 <div class="mh-team">
                     <div class="mh-flag">${teamFlag(home)}</div>
-                    <div class="mh-name">${esc(home.name)}</div>
+                    <div class="mh-name">${esc(home.name)} ${rankBadge(m.home)}</div>
                     ${MANAGERS[m.home] ? `<div class="mh-manager">👔 ${esc(MANAGERS[m.home])}</div>` : ''}
                 </div>
                 <div class="mh-score">${scoreDisplay}</div>
                 <div class="mh-team">
                     <div class="mh-flag">${teamFlag(away)}</div>
-                    <div class="mh-name">${esc(away.name)}</div>
+                    <div class="mh-name">${esc(away.name)} ${rankBadge(m.away)}</div>
                     ${MANAGERS[m.away] ? `<div class="mh-manager">👔 ${esc(MANAGERS[m.away])}</div>` : ''}
                 </div>
             </div>

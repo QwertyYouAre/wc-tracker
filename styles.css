@@ -780,6 +780,10 @@ img.flag-img.logo-flag   { height: 12px; margin: 0 .1rem; }
 .modal-header .mh-name { font-weight: 700; font-size: 1rem; }
 .modal-header .mh-manager { font-size: .72rem; font-weight: 500; opacity: .8; text-align: center; }
 
+/* FIFA ranking badge — inherits the surrounding text colour at low opacity so it
+   works on both light table rows and the dark modal headers. */
+.rank-badge { font-size: .62rem; font-weight: 700; opacity: .55; letter-spacing: .3px; white-space: nowrap; }
+
 .modal-header .mh-score {
     font-size: 2.4rem;
     font-weight: 800;
