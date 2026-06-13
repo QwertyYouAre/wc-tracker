@@ -276,10 +276,17 @@ function renderLiveSection() {
         .sort((a, b) => instantOf(b) - instantOf(a))
         .slice(0, 8);
 
+    // Under a specific filter, hide whole sections that have no matching
+    // matches so e.g. the "Finished" view doesn't still show an "Upcoming"
+    // heading. The "All" view keeps empty sections (their messages are useful).
+    const hideEmpty = STATE.filter !== 'all';
     const fill = (id, list, emptyMsg) => {
-        $(id).innerHTML = list.length
+        const grid = $(id);
+        grid.innerHTML = list.length
             ? list.map(matchCard).join('')
             : `<div class="empty-state">${emptyMsg}</div>`;
+        const block = grid.closest('.day-block');
+        if (block) block.style.display = (list.length || !hideEmpty) ? '' : 'none';
     };
 
     fill('#liveMatches', live, 'No live matches right now.');
