@@ -1021,11 +1021,22 @@ async function boot() {
     // fresh. ESPN (keyless, has stats + events) is primary; football-data is the
     // fallback. Both no-op gracefully if unreachable.
     if (live) {
-        const useEspn = await refreshESPN();
-        if (!useEspn) await refreshScores();
-        setInterval(() => {
-            refreshESPN().then(ok => { if (!ok) refreshScores(); });
-        }, 60000);
+        const tick = () => refreshESPN().then(ok => { if (!ok) refreshScores(); });
+        await tick(); // initial live layer over the schedule
+
+        // Auto-refresh so the viewer never has to reload. Poll faster while a
+        // match is in play (every 30s) than when nothing's live (every 60s)…
+        let timer = null;
+        const anyLive = () => MATCHES.some(m => m.status === 'live');
+        const loop = () => {
+            clearTimeout(timer);
+            timer = setTimeout(() => tick().then(loop), anyLive() ? 30000 : 60000);
+        };
+        loop();
+
+        // …and refresh immediately when the tab regains focus, so returning to
+        // the page never shows a stale score while waiting for the next tick.
+        document.addEventListener('visibilitychange', () => { if (!document.hidden) tick(); });
     }
 }
 
