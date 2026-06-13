@@ -709,6 +709,9 @@ img.flag-img.logo-flag   { height: 12px; margin: 0 .1rem; }
 .tl-text { color: var(--text); }
 .tl-text strong { color: var(--heading); }
 .tl-text .tl-team-tag { font-size: .75rem; color: var(--text-muted); margin-left: .4rem; }
+/* VAR-disallowed goal: dimmed, with the "GOAL DISALLOWED" label struck through. */
+.tl-void { opacity: .72; }
+.tl-void .tl-text strong { text-decoration: line-through; text-decoration-color: var(--wc-red); }
 
 /* FOOTER */
 footer {

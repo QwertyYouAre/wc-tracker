@@ -512,15 +512,16 @@ function modalDetailHtml(m) {
             <h4>Match Events</h4>
             ${evList.slice().sort((a, b) => b.min - a.min).map(ev => {
                 const team = ev.side === 'home' ? home : away;
-                const icon = ev.type === 'goal' ? '⚽' : ev.type === 'og' ? '🥅' : ev.type === 'yellow' ? '🟨' : ev.type === 'red' ? '🟥' : ev.type === 'sub' ? '🔄' : ev.type === 'penalty' ? '⚽' : '•';
+                const icon = ev.type === 'goal' ? '⚽' : ev.type === 'og' ? '🥅' : ev.type === 'yellow' ? '🟨' : ev.type === 'red' ? '🟥' : ev.type === 'sub' ? '🔄' : ev.type === 'disallowed' ? '🚫' : ev.type === 'penalty' ? '⚽' : '•';
                 const text = ev.type === 'goal'
                     ? `<strong>GOAL</strong>${ev.player ? ' · ' + ev.player : ''}${ev.assist ? ` <span class="muted">(assist: ${ev.assist})</span>` : ''}`
                     : ev.type === 'og' ? `<strong>OWN GOAL</strong>${ev.player ? ' · ' + ev.player : ''}`
                     : ev.type === 'yellow' ? `Yellow card${ev.player ? ' · ' + ev.player : ''}`
                     : ev.type === 'red' ? `<strong>RED CARD</strong>${ev.player ? ' · ' + ev.player : ''}`
                     : ev.type === 'sub' ? `Substitution${ev.player ? ' · ' + ev.player : ''}`
+                    : ev.type === 'disallowed' ? `<strong>GOAL DISALLOWED</strong>${ev.reason ? ` <span class="muted">(${ev.reason})</span>` : ''}${ev.player ? ' · ' + ev.player : ''}`
                     : `${ev.type}${ev.player ? ' · ' + ev.player : ''}`;
-                return `<div class="tl-event">
+                return `<div class="tl-event${ev.type === 'disallowed' ? ' tl-void' : ''}">
                     <span class="tl-min">${ev.minLabel || ev.min}'</span>
                     <span class="tl-icon">${icon}</span>
                     <span class="tl-text">${text}<span class="tl-team-tag">${teamFlag(team)} ${team.name}</span></span>
@@ -849,7 +850,8 @@ async function refreshESPN() {
         const idToCode = { [cs[0].id]: ab0, [cs[1].id]: ab1 };
         for (const det of (comp.details || [])) {
             const tyt = (det.type && det.type.text) || '';
-            if (!/goal/i.test(tyt) || /own goal/i.test(tyt)) continue;
+            // Real goals only — skip own goals and VAR-disallowed "goals".
+            if (!/goal/i.test(tyt) || /own goal/i.test(tyt) || /disallow|no goal|ruled out|cancell?ed/i.test(tyt)) continue;
             const code = idToCode[det.team && det.team.id];
             const ath = det.athletesInvolved && det.athletesInvolved[0] && det.athletesInvolved[0].displayName;
             if (code && ath) goalLog.push({ player: ath, code });
@@ -988,7 +990,10 @@ function applyEspnSummary(m, sum) {
     for (const e of (sum.keyEvents || [])) {
         const tyt = (e.type && e.type.text) || '';
         let type = null;
-        if (/own goal/i.test(tyt)) type = 'og';
+        // A VAR-cancelled goal reads as "Goal Disallowed" — catch it BEFORE the
+        // /goal/ checks so it's shown as disallowed, never as a real goal.
+        if (/disallow|no goal|ruled out|goal cancell?ed/i.test(tyt) || (/goal/i.test(tyt) && /offside|var|video review/i.test(tyt))) type = 'disallowed';
+        else if (/own goal/i.test(tyt)) type = 'og';
         else if (/goal/i.test(tyt)) type = 'goal';
         else if (/yellow card/i.test(tyt)) type = 'yellow';
         else if (/red card/i.test(tyt)) type = 'red';
@@ -1002,14 +1007,18 @@ function applyEspnSummary(m, sum) {
         const min = base + extra / 100;
         const minLabel = extra ? `${base}+${extra}` : `${base}`;
         const text = e.text || '';
-        let player = null, assist = null;
+        let player = null, assist = null, reason = null;
         if (type === 'goal' || type === 'og') {
             const mm = text.match(/\d\.\s*([^(.]+?)\s*\(/); if (mm) player = mm[1].trim();
             const am = text.match(/assisted by ([^.]+?)\./i); if (am) assist = am[1].trim();
+        } else if (type === 'disallowed') {
+            const rm = text.match(/offside|hand ?ball|foul|push(?:ing)?|encroach\w*/i);
+            if (rm) reason = rm[0].toLowerCase().replace(/hand ?ball/, 'handball');
+            const pm = text.match(/([A-Z][a-zà-ÿ'.-]+(?:\s+[A-Z][a-zà-ÿ'.-]+)+)\s*\(/); if (pm) player = pm[1].trim();
         } else {
             const mm = text.match(/^\s*([^(]+?)\s*\(/); if (mm) player = mm[1].trim();
         }
-        evs.push({ min, minLabel, type, side, player, assist });
+        evs.push({ min, minLabel, type, side, player, assist, reason });
     }
     if (evs.length) m.espnEvents = evs;
 }
