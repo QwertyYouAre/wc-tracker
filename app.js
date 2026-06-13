@@ -55,13 +55,15 @@ const MANAGERS = {
 };
 
 // FIFA code → FIFA/Coca-Cola Men's World Ranking position. Static reference (no
-// live feed carries it), from the June 2026 ranking. Update if FIFA re-ranks.
+// live data feed carries it). Source: official FIFA ranking API
+// (api.fifa.com/api/v3/fifarankings), 11 June 2026 release. Refresh when FIFA
+// re-ranks (next update 20 July 2026).
 const FIFA_RANK = {
     ARG: 1,  ESP: 2,  FRA: 3,  ENG: 4,  POR: 5,  BRA: 6,  MAR: 7,  NED: 8,  BEL: 9,  GER: 10,
-    CRO: 11, COL: 13, MEX: 14, SEN: 15, URU: 16, USA: 17, JPN: 18, SUI: 19, IRN: 20, TUR: 22,
-    ECU: 23, AUT: 24, KOR: 25, AUS: 27, ALG: 28, EGY: 29, CAN: 30, NOR: 31, CIV: 33, PAN: 34,
-    SWE: 38, CZE: 40, PAR: 41, SCO: 42, TUN: 45, COD: 46, UZB: 50, QAT: 56, IRQ: 57, RSA: 60,
-    KSA: 61, JOR: 63, BIH: 64, CPV: 67, GHA: 73, CUW: 82, HAI: 83, NZL: 85,
+    CRO: 11, MEX: 13, COL: 14, USA: 15, SEN: 16, URU: 17, JPN: 18, SUI: 19, IRN: 20, KOR: 22,
+    TUR: 23, ECU: 24, AUT: 25, AUS: 27, ALG: 28, EGY: 29, NOR: 30, CAN: 31, CIV: 33, PAN: 34,
+    SWE: 38, SCO: 40, PAR: 42, CZE: 43, TUN: 45, COD: 46, QAT: 50, UZB: 51, IRQ: 57, KSA: 60,
+    RSA: 61, BIH: 63, JOR: 64, CPV: 67, GHA: 73, CUW: 82, HAI: 83, NZL: 85,
 };
 
 // Small "#12" badge for a team's FIFA ranking. Inherits the surrounding text
