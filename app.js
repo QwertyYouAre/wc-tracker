@@ -842,17 +842,18 @@ function modalDetailHtml(m) {
             <h4>Match Events</h4>
             ${evList.slice().sort((a, b) => b.min - a.min).map(ev => {
                 const team = ev.side === 'home' ? home : away;
-                const icon = ev.type === 'goal' ? '⚽' : ev.type === 'og' ? '🥅' : ev.type === 'yellow' ? '🟨' : ev.type === 'red' ? '🟥' : ev.type === 'sub' ? '🔄' : ev.type === 'disallowed' ? '🚫' : ev.type === 'penalty' ? '⚽' : '•';
+                const icon = ev.type === 'goal' ? '⚽' : ev.type === 'og' ? '🥅' : ev.type === 'yellow' ? '🟨' : ev.type === 'red' ? '🟥' : ev.type === 'sub' ? '🔄' : ev.type === 'disallowed' ? '🚫' : ev.type === 'penmiss' ? '❌' : '•';
                 const who = ev.player ? ' · ' + esc(ev.player) : '';
                 const text = ev.type === 'goal'
-                    ? `<strong>GOAL</strong>${who}${ev.assist ? ` <span class="muted">(assist: ${esc(ev.assist)})</span>` : ''}`
+                    ? `<strong>GOAL</strong>${ev.pen ? ' <span class="muted">(pen)</span>' : ''}${who}${ev.assist ? ` <span class="muted">(assist: ${esc(ev.assist)})</span>` : ''}`
                     : ev.type === 'og' ? `<strong>OWN GOAL</strong>${who}`
                     : ev.type === 'yellow' ? `Yellow card${who}`
                     : ev.type === 'red' ? `<strong>RED CARD</strong>${who}`
                     : ev.type === 'sub' ? `Substitution${who}`
                     : ev.type === 'disallowed' ? `<strong>GOAL DISALLOWED</strong>${ev.reason ? ` <span class="muted">(${esc(ev.reason)})</span>` : ''}${who}`
+                    : ev.type === 'penmiss' ? `<strong>PENALTY ${ev.saved ? 'SAVED' : 'MISSED'}</strong>${who}`
                     : `${esc(ev.type)}${who}`;
-                return `<div class="tl-event${ev.type === 'disallowed' ? ' tl-void' : ''}">
+                return `<div class="tl-event${ev.type === 'disallowed' ? ' tl-void' : ''}${ev.type === 'penmiss' ? ' tl-miss' : ''}">
                     <span class="tl-min">${ev.minLabel || ev.min}'</span>
                     <span class="tl-icon">${icon}</span>
                     <span class="tl-text">${text}<span class="tl-team-tag">${teamFlag(team)} ${esc(team.name)}</span></span>
@@ -1519,15 +1520,25 @@ function applyEspnSummary(m, sum) {
     const evs = [];
     for (const e of (sum.keyEvents || [])) {
         const tyt = (e.type && e.type.text) || '';
-        let type = null;
+        const etext = e.text || '';
+        const blob = `${tyt} ${etext}`;
+        // ESPN flags a spot-kick with penaltyKick / shootout, or just says so in
+        // the text. A scored penalty is a goal (annotated); a missed or saved one
+        // used to fall through every branch and vanish — now it's its own event.
+        const isPen = e.penaltyKick === true || /\bpenalt/i.test(blob);
+        let type = null, pen = false, saved = false;
         // A VAR-cancelled goal reads as "Goal Disallowed" — catch it BEFORE the
         // /goal/ checks so it's shown as disallowed, never as a real goal.
         if (/disallow|no goal|ruled out|goal cancell?ed/i.test(tyt) || (/goal/i.test(tyt) && /offside|var|video review/i.test(tyt))) type = 'disallowed';
         else if (/own goal/i.test(tyt)) type = 'og';
+        else if (isPen && /saved/i.test(blob)) { type = 'penmiss'; saved = true; }
+        else if (isPen && /miss|fail|wide|over the|off the|hits? the (?:post|bar|crossbar)|woodwork/i.test(blob)) type = 'penmiss';
+        else if (isPen && (e.scoringPlay === true || /goal|scored|convert/i.test(blob))) { type = 'goal'; pen = true; }
         else if (/goal/i.test(tyt)) type = 'goal';
         else if (/yellow card/i.test(tyt)) type = 'yellow';
         else if (/red card/i.test(tyt)) type = 'red';
         else if (/substitut/i.test(tyt)) type = 'sub';
+        else if (isPen) type = 'penmiss'; // a penalty with no clear outcome — still surface it
         if (!type) continue;
         const side = idToCode[e.team && e.team.id] === m.away ? 'away' : 'home';
         // "45'+1'" → sortable 45.01, label "45+1"; "11'" → 11, "11"
@@ -1540,19 +1551,26 @@ function applyEspnSummary(m, sum) {
         if (periodNum >= 2 && base === 45 && !extra) base = 46;
         const min = base + extra / 100;
         const minLabel = extra ? `${base}+${extra}` : `${base}`;
-        const text = e.text || '';
+        const text = etext;
         let player = null, assist = null, reason = null;
         if (type === 'goal' || type === 'og') {
             const mm = text.match(/\d\.\s*([^(.]+?)\s*\(/); if (mm) player = mm[1].trim();
+            // Penalty-goal text often lacks the "12. Name" prefix — fall back to
+            // the first "Firstname Lastname (" in the sentence.
+            if (!player) { const pm = text.match(/([A-Z][a-zà-ÿ'.-]+(?:\s+[A-Z][a-zà-ÿ'.-]+)*)\s*\(/); if (pm) player = pm[1].trim(); }
             const am = text.match(/assisted by ([^.]+?)\./i); if (am) assist = am[1].trim();
-        } else if (type === 'disallowed') {
-            const rm = text.match(/offside|hand ?ball|foul|push(?:ing)?|encroach\w*/i);
-            if (rm) reason = rm[0].toLowerCase().replace(/hand ?ball/, 'handball');
-            const pm = text.match(/([A-Z][a-zà-ÿ'.-]+(?:\s+[A-Z][a-zà-ÿ'.-]+)+)\s*\(/); if (pm) player = pm[1].trim();
+        } else if (type === 'disallowed' || type === 'penmiss') {
+            // Name is the first "Name (" in the text — one or more words, so a
+            // single-name player (e.g. "Neymar (") is matched too.
+            const pm = text.match(/([A-Z][a-zà-ÿ'.-]+(?:\s+[A-Z][a-zà-ÿ'.-]+)*)\s*\(/); if (pm) player = pm[1].trim();
+            if (type === 'disallowed') {
+                const rm = text.match(/offside|hand ?ball|foul|push(?:ing)?|encroach\w*/i);
+                if (rm) reason = rm[0].toLowerCase().replace(/hand ?ball/, 'handball');
+            }
         } else {
             const mm = text.match(/^\s*([^(]+?)\s*\(/); if (mm) player = mm[1].trim();
         }
-        evs.push({ min, minLabel, type, side, player, assist, reason });
+        evs.push({ min, minLabel, type, side, player, assist, reason, pen, saved });
     }
     if (evs.length) m.espnEvents = evs;
 }

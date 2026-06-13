@@ -40,9 +40,13 @@ function buildEvent(type, id, m, side) {
 
 module.exports = async (req, res) => {
     // ---- auth ----
-    const secret = process.env.PUSH_TICK_SECRET;
+    // Accept either the GitHub Actions secret (PUSH_TICK_SECRET) or the Vercel
+    // Cron secret (CRON_SECRET, which Vercel sends as `Authorization: Bearer`).
     const auth = req.headers.authorization || '';
-    if (!secret || auth !== `Bearer ${secret}`) {
+    const ok = ['PUSH_TICK_SECRET', 'CRON_SECRET']
+        .map((k) => process.env[k])
+        .some((v) => v && auth === `Bearer ${v}`);
+    if (!ok) {
         res.status(401).json({ ok: false, reason: 'unauthorized' });
         return;
     }

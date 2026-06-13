@@ -866,6 +866,8 @@ img.flag-img.logo-flag   { height: 12px; margin: 0 .1rem; }
 /* VAR-disallowed goal: dimmed, with the "GOAL DISALLOWED" label struck through. */
 .tl-void { opacity: .72; }
 .tl-void .tl-text strong { text-decoration: line-through; text-decoration-color: var(--wc-red); }
+.tl-miss { opacity: .82; }
+.tl-miss .tl-text strong { color: var(--wc-red); }
 
 /* FOOTER */
 footer {
