@@ -1017,8 +1017,12 @@ function applyEspnSummary(m, sum) {
         const side = idToCode[e.team && e.team.id] === m.away ? 'away' : 'home';
         // "45'+1'" → sortable 45.01, label "45+1"; "11'" → 11, "11"
         const cm = String((e.clock && e.clock.displayValue) || '').match(/(\d+)(?:\D*\+(\d+))?/);
-        const base = cm ? parseInt(cm[1], 10) : 0;
+        let base = cm ? parseInt(cm[1], 10) : 0;
         const extra = cm && cm[2] ? parseInt(cm[2], 10) : 0;
+        // Subs made during the break sit on a frozen 45' clock but belong to the
+        // second half (period ≥ 2) — they're the 46th minute, not 45'.
+        const periodNum = (e.period && e.period.number) || 0;
+        if (periodNum >= 2 && base === 45 && !extra) base = 46;
         const min = base + extra / 100;
         const minLabel = extra ? `${base}+${extra}` : `${base}`;
         const text = e.text || '';
