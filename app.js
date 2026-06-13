@@ -1221,12 +1221,16 @@ async function refreshESPN() {
         if (cs[0].team.id) ESPN_TEAM_ID[ab0] = cs[0].team.id;
         if (cs[1].team.id) ESPN_TEAM_ID[ab1] = cs[1].team.id;
 
-        // Collect goal scorers from this match's details (excludes own goals).
+        // Collect goal scorers from this match's details. Counts open-play goals
+        // AND scored penalties (ESPN labels those "Penalty - Scored", with no
+        // "goal" in the text — they'd otherwise be missed); never own goals,
+        // VAR-disallowed goals, or missed/saved penalties.
         const idToCode = { [cs[0].id]: ab0, [cs[1].id]: ab1 };
         for (const det of (comp.details || [])) {
             const tyt = (det.type && det.type.text) || '';
-            // Real goals only — skip own goals and VAR-disallowed "goals".
-            if (!/goal/i.test(tyt) || /own goal/i.test(tyt) || /disallow|no goal|ruled out|cancell?ed/i.test(tyt)) continue;
+            const plainGoal = /goal/i.test(tyt) && !/own goal/i.test(tyt) && !/disallow|no goal|ruled out|cancell?ed/i.test(tyt);
+            const scoredPenalty = (det.penaltyKick === true || /penalt/i.test(tyt)) && det.scoringPlay === true && !/miss|saved/i.test(tyt);
+            if (!plainGoal && !scoredPenalty) continue;
             const code = idToCode[det.team && det.team.id];
             const a0 = det.athletesInvolved && det.athletesInvolved[0];
             if (code && a0 && a0.displayName) goalLog.push({ player: a0.displayName, code });
