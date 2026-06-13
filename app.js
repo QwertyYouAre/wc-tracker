@@ -189,14 +189,17 @@ function estimateMinute(m) {
     const elapsed = Math.floor((Date.now() - instantOf(m).getTime()) / 60000);
     if (elapsed < 0) return null;
     if (elapsed <= 45) return elapsed;   // first half
-    if (elapsed <= 60) return 45;        // half-time window
+    if (elapsed <= 60) return 'HT';      // half-time window
     return Math.min(elapsed - 15, 91);   // second half (minus the break)
 }
 
-// "LIVE · 63'" / "LIVE · 90+'" when the minute is known or can be estimated, else "LIVE".
+// "LIVE · 63'" / "LIVE · 90+'" when the minute is known or can be estimated,
+// "LIVE · HT" at half-time, else "LIVE".
 function liveLabel(m) {
+    if (m.halftime) return 'LIVE · HT';
     const min = m.apiMinute ?? estimateMinute(m);
     if (min == null) return 'LIVE';
+    if (min === 'HT') return 'LIVE · HT';
     return min > 90 ? "LIVE · 90+'" : `LIVE · ${min}'`;
 }
 
@@ -809,7 +812,10 @@ function mergeScores(payload) {
         m.homeScore = hs; m.awayScore = as;
         m.status = mapped;
         m.fromApi = true;
-        if (mapped === 'live') m.apiMinute = s.minute ?? null;
+        if (mapped === 'live') {
+            m.apiMinute = s.minute ?? null;
+            m.halftime = s.status === 'PAUSED'; // football-data uses PAUSED for the break
+        }
         applied++;
     }
     return applied > 0;
@@ -875,7 +881,9 @@ async function refreshESPN() {
         m.espnId = ev.id;
         if (st === 'live') {
             m.espnLoaded = false; // refetch detail on next open (stats change)
-            const dc = ev.status.displayClock || (ev.status.type && ev.status.type.detail) || '';
+            const t = ev.status.type || {};
+            m.halftime = t.name === 'STATUS_HALFTIME' || /half[\s-]?time/i.test(t.description || t.detail || '');
+            const dc = ev.status.displayClock || t.detail || '';
             const mm = String(dc).match(/(\d+)/);
             m.apiMinute = mm ? parseInt(mm[1], 10) : null;
         }
