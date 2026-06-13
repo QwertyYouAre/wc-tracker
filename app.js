@@ -442,13 +442,97 @@ function renderFavorites() {
     }).join('');
 }
 
+// Persist favorites to localStorage (browser) AND a cookie (so the
+// server-side api/ functions can read them for personalization).
+function saveFavorites() {
+    const json = JSON.stringify([...STATE.favorites]);
+    try { localStorage.setItem('wc26-favs', json); } catch (e) {}
+    // 1 year, root path, sent same-site on every request to our own api.
+    const maxAge = 60 * 60 * 24 * 365;
+    document.cookie = `wc26-favs=${encodeURIComponent(json)}; path=/; max-age=${maxAge}; samesite=lax`;
+}
+
 function toggleFavorite(code) {
     if (STATE.favorites.has(code)) STATE.favorites.delete(code);
     else STATE.favorites.add(code);
-    localStorage.setItem('wc26-favs', JSON.stringify([...STATE.favorites]));
+    saveFavorites();
     renderFavorites();
     renderLiveSection();
     renderGroups();
+    scheduleFavoritesFeed(); // refresh the server-driven feed (cookie just changed)
+}
+
+// ===== SERVER-PERSONALIZED FEED =====
+// Renders /api/favorites: the server reads the wc26-favs cookie and returns
+// only matches involving the user's teams (with live scores). This is the one
+// place the app trusts the server's personalization rather than filtering the
+// bundled MATCHES client-side — it proves the cookie round-trips end to end.
+
+// API uses football-data status codes; map them to our display states.
+function favFeedCard(m) {
+    const home = TEAM[m.home], away = TEAM[m.away];
+    const homeName = (home && home.name) || m.homeName || m.home;
+    const awayName = (away && away.name) || m.awayName || m.away;
+    const ui = { kickoffISO: m.utcDate }; // shape instantOf()/fmt* expect
+    const live = m.status === 'IN_PLAY' || m.status === 'PAUSED';
+    const done = m.status === 'FINISHED' || m.status === 'AWARDED';
+
+    let scoreHtml, statusHtml;
+    if (live) {
+        scoreHtml = `<div class="mc-score">${m.homeScore ?? 0} – ${m.awayScore ?? 0}</div>`;
+        statusHtml = `<span class="live-tag"><span class="live-dot"></span>LIVE${m.minute ? ` · ${m.minute}'` : ''}</span>`;
+    } else if (done) {
+        scoreHtml = `<div class="mc-score">${m.homeScore ?? 0} – ${m.awayScore ?? 0}</div>`;
+        statusHtml = `<span>FT · ${fmtLocalDate(ui)}</span>`;
+    } else {
+        scoreHtml = `<div class="mc-score"><span class="vs">${fmtLocalTime(ui)}</span></div>`;
+        statusHtml = `<span>${fmtLocalDate(ui)}</span>`;
+    }
+
+    return `
+        <div class="match-card favorite${live ? ' live' : ''}">
+            <div class="mc-top"><span>World Cup</span>${statusHtml}</div>
+            <div class="mc-teams">
+                <div class="mc-team">
+                    <span class="mc-flag">${teamFlag(home)}</span>
+                    <span class="mc-name">${homeName}</span>
+                </div>
+                ${scoreHtml}
+                <div class="mc-team away">
+                    <span class="mc-flag">${teamFlag(away)}</span>
+                    <span class="mc-name">${awayName}</span>
+                </div>
+            </div>
+        </div>`;
+}
+
+async function renderFavoritesFeed() {
+    const block = $('#favFeed'), grid = $('#favFeedMatches');
+    if (!block || !grid) return;
+
+    // No favorites → nothing for the server to personalize; keep it hidden.
+    if (STATE.favorites.size === 0) { block.hidden = true; return; }
+
+    try {
+        const res = await fetch('/api/favorites', { headers: { Accept: 'application/json' } });
+        const data = await res.json();
+        const matches = (data && data.matches) || [];
+        // Hide quietly when the endpoint isn't configured (no token) or has no
+        // fixtures yet — the picker below already covers the user.
+        if (!data.ok || matches.length === 0) { block.hidden = true; return; }
+        grid.innerHTML = matches.slice(0, 8).map(favFeedCard).join('');
+        block.hidden = false;
+    } catch (e) {
+        block.hidden = true; // offline / network error — fail quiet
+    }
+}
+
+// Debounce: toggling several teams quickly shouldn't fire a request per click
+// (football-data's free tier is rate-limited).
+let favFeedTimer = null;
+function scheduleFavoritesFeed() {
+    clearTimeout(favFeedTimer);
+    favFeedTimer = setTimeout(renderFavoritesFeed, 600);
 }
 
 // ===== MATCH MODAL =====
@@ -942,12 +1026,14 @@ function renderAll() {
     renderBracket();
     renderScorers();
     renderFavorites();
+    renderFavoritesFeed();
     if (!tickerStarted) { startLiveTicker(); tickerStarted = true; }
 }
 
 // One-time wiring that needs no data.
 function initChrome() {
     initTheme();
+    saveFavorites(); // seed the cookie from any favorites already in localStorage
     $$('.nav-link').forEach(l => l.addEventListener('click', e => { e.preventDefault(); setSection(l.dataset.section); }));
     $$('.filter-chip').forEach(c => c.addEventListener('click', () => {
         $$('.filter-chip').forEach(x => x.classList.remove('active'));
