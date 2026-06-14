@@ -1509,8 +1509,13 @@ async function refreshESPN() {
         const m = byPair.get(pairKey(ab0, ab1));
         if (!m) continue;
         m.espnId = ev.id; // keep for win-odds + lazy detail, even while still 'pre'
-        const st = ESPN_STATE[ev.status.type.state];
+        let st = ESPN_STATE[ev.status.type.state];
         if (!st) continue; // 'pre' → leave upcoming (odds still load below)
+        // Stale-feed guard: a group-stage match (no extra time) ESPN still flags
+        // "live" far beyond any real match length (90' + half-time + stoppage ≈ 2h)
+        // means the live feed is stuck — show it finished with the last-known score
+        // rather than running the clock forever. ESPN itself can lag 30-60 min here.
+        if (st === 'live' && (Date.now() - instantOf(m).getTime()) / 60000 > 135) st = 'finished';
         const score = {}; score[ab0] = parseInt(cs[0].score, 10); score[ab1] = parseInt(cs[1].score, 10);
         if (isNaN(score[m.home]) || isNaN(score[m.away])) continue;
         m.homeScore = score[m.home]; m.awayScore = score[m.away];
