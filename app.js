@@ -258,11 +258,25 @@ function estimateMinute(m) {
     return Math.min(elapsed - 15, 91);   // second half (minus the break)
 }
 
+// The current match minute, advanced smoothly between the ~30s data refreshes so
+// the clock and the live win chance keep moving in real time instead of jumping
+// once per refresh. ESPN's minute (apiMinute) is the anchor; we add the real time
+// elapsed since it was read. Frozen at 'HT'.
+function liveClock(m) {
+    if (m.halftime) return 'HT';
+    if (m.apiMinute != null) {
+        const since = m.apiMinuteAt ? Math.max(0, (Date.now() - m.apiMinuteAt) / 60000) : 0;
+        return Math.min(m.apiMinute + since, 100); // cap so a stalled feed can't run away
+    }
+    return estimateMinute(m);
+}
+
 // "LIVE · 63'" / "LIVE · 90+'" when the minute is known or can be estimated,
 // "LIVE · HT" at half-time, else "LIVE".
 function liveLabel(m) {
     if (m.halftime) return 'LIVE · HT';
-    const min = m.apiMinute ?? estimateMinute(m);
+    const c = liveClock(m);
+    const min = c === 'HT' ? 'HT' : (typeof c === 'number' ? Math.floor(c) : null);
     if (min == null) return 'LIVE';
     if (min === 'HT') return 'LIVE · HT';
     return min > 90 ? "LIVE · 90+'" : `LIVE · ${min}'`;
@@ -313,7 +327,7 @@ function lambdasFromProbs(pH, pA, total) {
 function liveWinProb(m) {
     if (m.status !== 'live' || !m.odds) return null;
     const lam = m._lam || (m._lam = lambdasFromProbs(m.odds.home / 100, m.odds.away / 100, m.odds.total));
-    const min = m.apiMinute ?? estimateMinute(m);
+    const min = liveClock(m);
     const elapsed = min === 'HT' ? 45 : (typeof min === 'number' ? min : 0);
     // A match runs ~90' PLUS stoppage time, and a goal can come right up to the
     // final whistle. So allow for added time and never let the remaining time hit
@@ -1243,13 +1257,15 @@ function setSection(name) {
 
 // ===== LIVE MINUTE TICKER =====
 function startLiveTicker() {
-    // Re-render live cards periodically so estimated minutes (and the live win
-    // chance that depends on them) advance on screen even between data refreshes.
+    // Re-render the visible live cards on a short interval so the clock and the
+    // live win chance (which now advance continuously via liveClock) keep moving
+    // on screen between the ~30s data refreshes.
     setInterval(() => {
         if (!MATCHES.some(m => m.status === 'live')) return;
         if ($('#live').classList.contains('active-section')) renderLiveSection();
+        if ($('#favorites').classList.contains('active-section')) renderFavoritesFeed();
         refreshOpenModalBars();
-    }, 20000);
+    }, 10000);
 }
 
 // ===== LIVE DATA SOURCE: openfootball (with bundled fallback) =====
@@ -1506,6 +1522,7 @@ async function refreshESPN() {
             const dc = ev.status.displayClock || t.detail || '';
             const mm = String(dc).match(/(\d+)/);
             m.apiMinute = mm ? parseInt(mm[1], 10) : null;
+            m.apiMinuteAt = Date.now(); // when this minute was read, for smooth interpolation
 
             // Slim live team stats straight off the scoreboard (no extra fetch),
             // oriented to the app's home/away, for a stats strip on the card.
