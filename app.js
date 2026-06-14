@@ -315,7 +315,13 @@ function liveWinProb(m) {
     const lam = m._lam || (m._lam = lambdasFromProbs(m.odds.home / 100, m.odds.away / 100, m.odds.total));
     const min = m.apiMinute ?? estimateMinute(m);
     const elapsed = min === 'HT' ? 45 : (typeof min === 'number' ? min : 0);
-    const remain = Math.max(0, 90 - Math.min(elapsed, 90)) / 90;
+    // A match runs ~90' PLUS stoppage time, and a goal can come right up to the
+    // final whistle. So allow for added time and never let the remaining time hit
+    // zero while the match is still live — otherwise a level game wrongly reads a
+    // 100% draw at 90'. The estimate only resolves once status flips to 'finished'
+    // (this function returns null then), so there's always some time left here.
+    const remainMin = Math.max(94 - elapsed, 2);
+    const remain = Math.min(1, remainMin / 90);
     const muH = lam.lh * remain, muA = lam.la * remain;
     const gd = (m.homeScore || 0) - (m.awayScore || 0);
     const N = 8;
