@@ -696,6 +696,83 @@ function renderScorers() {
         : '<tr><td colspan="4" class="muted" style="text-align:center;padding:1rem;">No goals scored yet — the tournament has just begun.</td></tr>';
 }
 
+// ===== TOP ASSISTS =====
+// Assists aren't in the scoreboard, so we read ESPN's tournament "assists" leaders
+// feed (athlete + team come as refs). Team ids match the scoreboard's, so we
+// reverse-map them for free via ESPN_TEAM_ID; only the top players' names need a
+// lookup, which we do once and cache.
+let ASSIST_LEADERS = null;      // [{player, team, assists}] once loaded
+let assistLeadersLoading = false;
+let assistLoadedAt = 0;         // for a gentle periodic refresh (counts change as games play)
+const ATHLETE_NAME_CACHE = {};  // athlete $ref -> displayName (resolved once per player)
+
+async function resolveAthleteNames(refs) {
+    const todo = [...new Set(refs)].filter(r => r && !(r in ATHLETE_NAME_CACHE));
+    const LIMIT = 6; // gentle concurrency
+    for (let i = 0; i < todo.length; i += LIMIT) {
+        await Promise.all(todo.slice(i, i + LIMIT).map(async (ref) => {
+            try {
+                const a = await (await fetch(ref.replace(/^http:/, 'https:'))).json(); // https: avoid mixed-content block
+                ATHLETE_NAME_CACHE[ref] = a.displayName || a.shortName || null;
+            } catch (e) { ATHLETE_NAME_CACHE[ref] = null; }
+        }));
+    }
+}
+
+// Load (or refresh, at most every ~2 min) the assist leaders. Self-throttled and
+// re-renders the table when fresh data lands; names are resolved once and cached.
+async function loadAssistLeaders() {
+    if (assistLeadersLoading) return;
+    if (ASSIST_LEADERS && Date.now() - assistLoadedAt < 120000) return; // still fresh
+    if (!Object.keys(ESPN_TEAM_ID).length) return; // need the team-id map first
+    assistLeadersLoading = true;
+    try {
+        const d = await (await fetch(`${ESPN_CORE_BASE}/seasons/2026/types/1/leaders`)).json();
+        const cat = (d.categories || []).find(c => c.name === 'assists');
+        const idToCode = {};
+        for (const code of Object.keys(ESPN_TEAM_ID)) idToCode[ESPN_TEAM_ID[code]] = code;
+        const entries = ((cat && cat.leaders) || []).map(L => ({
+            assists: Math.round(L.value) || 0,
+            ref: L.athlete && L.athlete.$ref,
+            code: idToCode[(String(L.team && L.team.$ref).match(/teams\/(\d+)/) || [])[1]],
+        })).filter(e => e.ref && e.assists > 0 && e.code && TEAM[e.code]);
+        entries.sort((a, b) => b.assists - a.assists);
+        const top = entries.slice(0, 14); // a few past 10 to cover ties
+        await resolveAthleteNames(top.map(e => e.ref));
+        ASSIST_LEADERS = top
+            .map(e => ({ player: ATHLETE_NAME_CACHE[e.ref], team: TEAM[e.code], assists: e.assists }))
+            .filter(e => e.player);
+        assistLoadedAt = Date.now();
+        renderAssists(); // paint the fresh data
+    } catch (e) { /* leave prior data; the table shows a graceful message */ }
+    assistLeadersLoading = false;
+}
+
+function renderAssists() {
+    const body = $('#assistsBody');
+    if (!body) return;
+    loadAssistLeaders(); // self-throttled; re-renders when fresh data arrives
+    if (!ASSIST_LEADERS) {
+        body.innerHTML = '<tr><td colspan="4" class="muted" style="text-align:center;padding:1rem;">Loading assist leaders…</td></tr>';
+        return;
+    }
+    let list = ASSIST_LEADERS.slice().sort((a, b) => b.assists - a.assists || a.player.localeCompare(b.player));
+    if (list.length > 10) { const cutoff = list[9].assists; list = list.filter(s => s.assists >= cutoff); }
+    let rank = 0, prev = null;
+    body.innerHTML = list.length
+        ? list.map((s, i) => {
+            if (s.assists !== prev) { rank = i + 1; prev = s.assists; }
+            return `
+            <tr>
+                <td>${rank}</td>
+                <td><strong>${esc(s.player)}</strong></td>
+                <td class="team-cell"><span class="mini-flag">${teamFlag(s.team)}</span>${esc(s.team.name)}</td>
+                <td class="goals-cell">${s.assists}</td>
+            </tr>`;
+        }).join('')
+        : '<tr><td colspan="4" class="muted" style="text-align:center;padding:1rem;">No assists recorded yet — the tournament has just begun.</td></tr>';
+}
+
 // ===== FAVORITES =====
 function renderFavorites() {
     $('#favoritesPicker').innerHTML = TEAMS.map(t => {
@@ -1947,6 +2024,7 @@ function renderAll() {
     renderGroups();
     renderBracket();
     renderScorers();
+    renderAssists();
     renderFavorites();
     renderFavoritesFeed();
     renderStructuredData();
