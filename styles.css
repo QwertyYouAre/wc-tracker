@@ -353,6 +353,7 @@ img.flag-img.logo-flag   { height: 12px; margin: 0 .1rem; }
 }
 
 .mc-score .vs { font-size: 1rem; color: var(--text-muted); font-weight: 600; }
+.mc-pens { font-size: .8rem; font-weight: 700; color: var(--text-muted); }
 
 .mc-bottom {
     margin-top: .75rem;
@@ -829,6 +830,7 @@ img.flag-img.logo-flag   { height: 12px; margin: 0 .1rem; }
 }
 
 .modal-header .mh-score .vs { font-size: 1.4rem; color: rgba(255,255,255,.7); }
+.modal-header .mh-score .mh-pens { font-size: 1.3rem; font-weight: 700; color: rgba(255,255,255,.75); }
 
 .modal-header .mh-status {
     text-align: center;

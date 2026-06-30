@@ -266,7 +266,9 @@ function liveClock(m) {
     if (m.halftime) return 'HT';
     if (m.apiMinute != null) {
         const since = m.apiMinuteAt ? Math.max(0, (Date.now() - m.apiMinuteAt) / 60000) : 0;
-        return Math.min(m.apiMinute + since, 100); // cap so a stalled feed can't run away
+        // Knockout ties can run to extra time (up to 120'), so allow the clock
+        // past 90' for them; group games still cap near full time.
+        return Math.min(m.apiMinute + since, m.knockout ? 128 : 100); // cap so a stalled feed can't run away
     }
     return estimateMinute(m);
 }
@@ -279,7 +281,8 @@ function liveLabel(m) {
     const min = c === 'HT' ? 'HT' : (typeof c === 'number' ? Math.floor(c) : null);
     if (min == null) return 'LIVE';
     if (min === 'HT') return 'LIVE · HT';
-    return min > 90 ? "LIVE · 90+'" : `LIVE · ${min}'`;
+    if (min > 90) return m.knockout ? `LIVE · ET ${min}'` : "LIVE · 90+'";
+    return `LIVE · ${min}'`;
 }
 
 // ===== LIVE WIN PROBABILITY (estimate) =====
@@ -405,6 +408,17 @@ function liveStatsHtml(m) {
     return `<div class="mc-stats"><div class="mcs-cap">📊 Live stats</div>${possHtml}${shotsHtml}</div>`;
 }
 
+// Top-bar label/tag for a match: its group, or the knockout round for bracket
+// ties synthesized from the live feed (which have no group letter).
+const matchStageLabel = (m) => m.knockout ? (m.stage || 'Knockout') : `Group ${m.group}`;
+const matchStageTag = (m) => m.knockout ? '🏆' : m.group;
+
+// Extra-time / shootout annotations for a decided knockout tie. `penParens`
+// renders the penalty shootout in parentheses after the score (e.g. "(4–3)");
+// `ftLabel` marks the clock as AET or "FT · Pens" when a tie ran past 90'.
+const penParens = (m) => (m.pens && m.homePens != null) ? ` <span class="mc-pens">(${m.homePens}–${m.awayPens})</span>` : '';
+const ftLabel = (m) => m.pens ? 'FT · Pens' : m.aet ? 'AET' : 'FT';
+
 // ===== MATCH CARD =====
 function matchCard(m) {
     const home = TEAM[m.home], away = TEAM[m.away];
@@ -416,8 +430,8 @@ function matchCard(m) {
         scoreHtml = `<div class="mc-score">${m.homeScore} – ${m.awayScore}</div>`;
         statusHtml = `<span class="live-tag"><span class="live-dot"></span>${liveLabel(m)}</span>`;
     } else if (m.status === 'finished') {
-        scoreHtml = `<div class="mc-score">${m.homeScore} – ${m.awayScore}</div>`;
-        statusHtml = `<span>FT · ${fmtLocalDate(m)}</span>`;
+        scoreHtml = `<div class="mc-score">${m.homeScore} – ${m.awayScore}${penParens(m)}</div>`;
+        statusHtml = `<span>${ftLabel(m)} · ${fmtLocalDate(m)}</span>`;
     } else {
         scoreHtml = `<div class="mc-score"><span class="vs">${fmtLocalTime(m)}</span></div>`;
         statusHtml = `<span>${fmtLocalDate(m)}</span>`;
@@ -427,11 +441,11 @@ function matchCard(m) {
         ? `<span class="mc-countdown">${relativeUntil(m)}</span>`
         : '';
 
-    const aria = `${TEAM[m.home].name} versus ${TEAM[m.away].name}, Group ${m.group}. Open match details.`;
+    const aria = `${TEAM[m.home].name} versus ${TEAM[m.away].name}, ${matchStageLabel(m)}. Open match details.`;
     return `
         <div class="${cls}" data-match="${m.id}" role="button" tabindex="0" aria-label="${esc(aria)}">
             <div class="mc-top">
-                <span><span class="mc-group-tag">${m.group}</span> Group ${m.group}</span>
+                <span><span class="mc-group-tag">${matchStageTag(m)}</span> ${matchStageLabel(m)}</span>
                 ${statusHtml}
             </div>
             <div class="mc-teams">
@@ -558,16 +572,65 @@ function renderGroups() {
 // ===== BRACKET =====
 // R32 pairings — placeholder labels resolve to teams when standings allow.
 // Slot label "1A" = winner of Group A, "2C" = runner-up of Group C, "3-N" = Nth-best 3rd-placed team.
+// Order matters: advanceRound() pairs adjacent entries, so this list is the
+// official FIFA 2026 bracket read top-to-bottom (matches 73-88). Each pair of
+// rows below feeds one Round-of-16 tie; each block of four feeds one
+// quarterfinal; the first eight rows are one semifinal half, the last eight the
+// other. (3rd-place slots are filled by overall rank as a best-effort stand-in
+// for FIFA's group-of-origin allocation table.)
 const R32_PAIRS = [
-    ['1A', '2C'],  ['1B', '3-1'],
-    ['1C', '2A'],  ['1D', '3-2'],
-    ['1E', '2G'],  ['1F', '3-3'],
-    ['1G', '2E'],  ['1H', '3-4'],
-    ['1I', '2L'],  ['1J', '3-5'],
-    ['1K', '2J'],  ['1L', '3-6'],
-    ['2B', '3-7'], ['2D', '3-8'],
-    ['2F', '2H'],  ['2I', '2K'],
+    // —— Semifinal half 1 ——
+    ['1E', '3-1'],  ['1I', '3-2'],   // QF1 · R16 M89  (M74, M77)
+    ['1C', '2F'],   ['1F', '2C'],    // QF1 · R16 M90  (M76, M75)
+    ['2A', '2B'],   ['2E', '2I'],    // QF2 · R16 M93  (M73, M78)
+    ['1A', '3-3'],  ['1L', '3-4'],   // QF2 · R16 M94  (M79, M80)
+    // —— Semifinal half 2 ——
+    ['2K', '2L'],   ['1H', '2J'],    // QF3 · R16 M91  (M83, M84)
+    ['1D', '3-5'],  ['1G', '3-6'],   // QF3 · R16 M92  (M81, M82)
+    ['1J', '2H'],   ['2D', '2G'],    // QF4 · R16 M95  (M86, M88)
+    ['1B', '3-7'],  ['1K', '3-8'],   // QF4 · R16 M96  (M85, M87)
 ];
+
+// Each "winner vs 3rd" R32 slot can only receive a third-placed team from a
+// fixed set of groups (FIFA 2026 allocation table). Key = bracket slot label,
+// value = the eligible groups; the labels line up with R32_PAIRS above.
+const THIRD_SLOTS = {
+    '3-1': 'ABCDF', // 1E · M74
+    '3-2': 'CDFGH', // 1I · M77
+    '3-3': 'CEFHI', // 1A · M79
+    '3-4': 'EHIJK', // 1L · M80
+    '3-5': 'BEFIJ', // 1D · M81
+    '3-6': 'AEHIJ', // 1G · M82
+    '3-7': 'EFGIJ', // 1B · M85
+    '3-8': 'DEIJL', // 1K · M87
+};
+
+// Match the eight best third-placed teams to the eight 3rd-place slots so every
+// team lands in a group it's actually eligible for (no impossible same-group
+// ties). Computed once per render into THIRD_ASSIGN; empty until all eight
+// thirds are settled, so slots show an eligible-groups placeholder before then.
+let THIRD_ASSIGN = {};
+function assignThirds() {
+    const all = bestThirds();
+    if (all.length < 12 || all.slice(0, 12).some(r => !(r.p > 0))) return {};
+    const thirds = all.slice(0, 8); // the eight qualifiers, by rank
+    const slots = Object.keys(THIRD_SLOTS);
+    const assign = {};
+    const used = new Set();
+    // Backtracking matching, trying higher-ranked thirds first.
+    const solve = (i) => {
+        if (i === slots.length) return true;
+        const allowed = THIRD_SLOTS[slots[i]];
+        for (let j = 0; j < thirds.length; j++) {
+            if (used.has(j) || !allowed.includes(thirds[j].group)) continue;
+            used.add(j); assign[slots[i]] = thirds[j];
+            if (solve(i + 1)) return true;
+            used.delete(j); delete assign[slots[i]];
+        }
+        return false;
+    };
+    return solve(0) ? assign : {};
+}
 
 function resolveSlot(label) {
     if (/^[12][A-L]$/.test(label)) {
@@ -578,11 +641,10 @@ function resolveSlot(label) {
         return { name: label[0] === '1' ? `Winner ${grp}` : `Runner-up ${grp}`, flag: '🏳️', placeholder: true };
     }
     if (/^3-\d+$/.test(label)) {
-        const n = +label.split('-')[1] - 1;
-        const thirds = bestThirds();
-        const row = thirds[n];
+        const row = THIRD_ASSIGN[label];
         if (row && row.p > 0) return row.team;
-        return { name: `${ordinal(n + 1)} best 3rd`, flag: '🏳️', placeholder: true };
+        const groups = (THIRD_SLOTS[label] || '').split('').join('/');
+        return { name: groups ? `3rd: ${groups}` : `${label} 3rd`, flag: '🏳️', placeholder: true };
     }
     return { name: label, flag: '🏳️', placeholder: true };
 }
@@ -638,11 +700,55 @@ function advanceRound(prev, prefix) {
     return slots;
 }
 
+// FIFA bracket label for a settled group finisher: '1X'/'2X' for the (deterministic)
+// winner/runner-up of group X, '3X' for its third-placed team. Null until played.
+function teamSlotLabel(code) {
+    for (const g of Object.keys(STATE.standings || {})) {
+        const rows = STATE.standings[g] || [];
+        const idx = rows.findIndex(r => r.team && r.team.code === code && r.p > 0);
+        if (idx === 0) return '1' + g;
+        if (idx === 1) return '2' + g;
+        if (idx === 2) return '3' + g;
+    }
+    return null;
+}
+
+// Pin each model R32 slot to the teams that ACTUALLY contested it, read from the
+// live feed's real Round-of-32 ties (synthesized into MATCHES). The deterministic
+// winner/runner-up side (1X/2X) anchors the tie to its slot; the opposing side
+// then comes straight from reality — so a mis-predicted third-place allocation
+// can't leave the wrong team standing in front of, e.g., Germany. The real result
+// (via KNOCKOUT) then propagates correctly. Returns { slotIndex: {a, b} }.
+function realR32Slots() {
+    const labelToSlot = {};
+    R32_PAIRS.forEach((pair, i) => pair.forEach(l => { if (/^[12][A-L]$/.test(l)) labelToSlot[l] = i; }));
+    const out = {};
+    for (const m of MATCHES) {
+        if (!m.knockout || !/32/.test(m.stage || '')) continue;
+        const home = TEAM[m.home], away = TEAM[m.away];
+        if (!home || !away) continue;
+        const lh = teamSlotLabel(m.home), la = teamSlotLabel(m.away);
+        let idx, label, carrierHome;
+        if (lh != null && labelToSlot[lh] !== undefined) { idx = labelToSlot[lh]; label = lh; carrierHome = true; }
+        else if (la != null && labelToSlot[la] !== undefined) { idx = labelToSlot[la]; label = la; carrierHome = false; }
+        if (idx === undefined || out[idx]) continue;
+        const pair = R32_PAIRS[idx];
+        const carrier = carrierHome ? home : away, other = carrierHome ? away : home;
+        out[idx] = label === pair[0] ? { a: carrier, b: other } : { a: other, b: carrier };
+    }
+    return out;
+}
+
 function renderBracket() {
-    // R32 sides come from the settled group standings; winners (and everything
-    // beyond) come from real ESPN knockout results via KNOCKOUT.
+    // R32 sides come from the real ESPN ties where known, else the settled group
+    // standings; winners (and everything beyond) come from real ESPN knockout
+    // results via KNOCKOUT.
+    THIRD_ASSIGN = assignThirds(); // route best thirds to eligible slots first
+    const realSlots = realR32Slots();
     let r32 = R32_PAIRS.map((pair, i) => {
-        const a = resolveSlot(pair[0]), b = resolveSlot(pair[1]);
+        const real = realSlots[i];
+        const a = real ? real.a : resolveSlot(pair[0]);
+        const b = real ? real.b : resolveSlot(pair[1]);
         return { a, b, winner: knockoutWinner(a, b), tag: `M${i + 1}` };
     });
     const r16 = advanceRound(r32, 'R16-');
@@ -1214,17 +1320,18 @@ function openMatchModal(matchId) {
 
     let statusLine;
     if (m.status === 'live') statusLine = `<span class="live-tag"><span class="live-dot"></span>${liveLabel(m)}</span>`;
-    else if (m.status === 'finished') statusLine = `Full Time · ${fmtLocalDateTime(m)}`;
+    else if (m.status === 'finished') statusLine = `${m.pens ? 'After Penalties' : m.aet ? 'After Extra Time' : 'Full Time'} · ${fmtLocalDateTime(m)}`;
     else statusLine = `Kick off ${fmtLocalDateTime(m)}`;
 
+    const mhPens = (m.pens && m.homePens != null) ? ` <span class="mh-pens">(${m.homePens}–${m.awayPens})</span>` : '';
     const scoreDisplay = (m.status === 'live' || m.status === 'finished')
-        ? `${m.homeScore} <span class="vs">–</span> ${m.awayScore}`
+        ? `${m.homeScore} <span class="vs">–</span> ${m.awayScore}${mhPens}`
         : `<span class="vs">vs</span>`;
 
     $('#modalBody').innerHTML = `
         <div class="modal-header">
             <div class="mh-meta">
-                <span><span class="mc-group-tag">${m.group}</span> Group ${m.group}</span>
+                <span><span class="mc-group-tag">${matchStageTag(m)}</span> ${matchStageLabel(m)}</span>
                 <span>📍 ${esc(m.venue)}</span>
             </div>
             <div class="mh-teams">
@@ -1583,20 +1690,59 @@ async function refreshESPN() {
             if (w) KNOCKOUT[pairKey(ab0, ab1)] = w;
         }
 
-        const m = byPair.get(pairKey(ab0, ab1));
-        if (!m) continue;
+        let m = byPair.get(pairKey(ab0, ab1));
+        if (!m) {
+            // Not a bundled group game → it's a knockout tie (MATCHES only ships
+            // the 72 group matches; the app builds its own bracket). Synthesize a
+            // card from the ESPN event so live/upcoming/finished knockout ties
+            // still appear in Live & Upcoming. Skip if either side is unknown.
+            if (!TEAM[ab0] || !TEAM[ab1]) continue;
+            // ESPN carries the round as a season slug, e.g. "round-of-32".
+            const slug = (ev.season && ev.season.slug) || '';
+            const stage = slug
+                ? slug.split('-').map(w => w === 'of' ? 'of' : w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
+                : 'Knockout';
+            m = {
+                id: `ko-${ev.id}`, knockout: true, stage,
+                group: stage, // never a group letter, so it stays out of standings
+                home: ab0, away: ab1,
+                date: (ev.date || '').slice(0, 10),
+                kickoffISO: ev.date || `${(ev.date || '').slice(0, 10)}T00:00:00Z`,
+                venue: (comp.venue && comp.venue.fullName) || 'TBD',
+                status: 'upcoming',
+            };
+            MATCHES.push(m);
+            byPair.set(pairKey(ab0, ab1), m); // dedupe within this same pass
+        }
         m.espnId = ev.id; // keep for win-odds + lazy detail, even while still 'pre'
         let st = ESPN_STATE[ev.status.type.state];
         if (!st) continue; // 'pre' → leave upcoming (odds still load below)
-        // Stale-feed guard: a group-stage match (no extra time) ESPN still flags
-        // "live" far beyond any real match length (90' + half-time + stoppage ≈ 2h)
-        // means the live feed is stuck — show it finished with the last-known score
-        // rather than running the clock forever. ESPN itself can lag 30-60 min here.
-        if (st === 'live' && (Date.now() - instantOf(m).getTime()) / 60000 > 135) st = 'finished';
+        // Stale-feed guard: a match ESPN still flags "live" far beyond any real
+        // match length means the feed is stuck — show it finished with the
+        // last-known score rather than running the clock forever (ESPN itself can
+        // lag 30-60 min). Group games (90' + half-time + stoppage ≈ 2h) cap at
+        // 135 min; knockout ties can run to extra time + penalties, so allow more.
+        const stuckLimit = m.knockout ? 240 : 135;
+        if (st === 'live' && (Date.now() - instantOf(m).getTime()) / 60000 > stuckLimit) st = 'finished';
         const score = {}; score[ab0] = parseInt(cs[0].score, 10); score[ab1] = parseInt(cs[1].score, 10);
         if (isNaN(score[m.home]) || isNaN(score[m.away])) continue;
         m.homeScore = score[m.home]; m.awayScore = score[m.away];
         m.status = st;
+        // Knockout ties can be settled in extra time or a penalty shootout. ESPN
+        // flags these via the status type (STATUS_FINAL_AET / STATUS_FINAL_PEN)
+        // and carries the shootout result in each side's shootoutScore. Capture
+        // both so the scoreboard can mark "AET" and show the pens in parentheses.
+        if (st === 'finished') {
+            const tn = (ev.status.type && ev.status.type.name) || '';
+            const td = (ev.status.type && (ev.status.type.description || ev.status.type.detail)) || '';
+            m.pens = /pen/i.test(tn) || /penalt/i.test(td);
+            m.aet = m.pens || /aet|extra[\s-]?time/i.test(tn + ' ' + td);
+            if (m.pens) {
+                const sp = {}; sp[ab0] = parseInt(cs[0].shootoutScore, 10); sp[ab1] = parseInt(cs[1].shootoutScore, 10);
+                if (!isNaN(sp[m.home]) && !isNaN(sp[m.away])) { m.homePens = sp[m.home]; m.awayPens = sp[m.away]; }
+                else { m.homePens = m.awayPens = null; }
+            } else { m.homePens = m.awayPens = null; }
+        } else { m.aet = m.pens = false; }
         if (st === 'live') {
             m.espnLoaded = false; // refetch detail on next open (stats change)
             const t = ev.status.type || {};
